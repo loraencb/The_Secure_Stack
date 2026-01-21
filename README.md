@@ -124,7 +124,7 @@ a React frontend, a FastAPI backend, and Docker-based practice labs.
 The backend manages authentication, sessions, lab orchestration, AI analysis, and reporting, while the frontend provides a clean UI for controlling labs and viewing results.
 
 ## Team Ownership
-- Frontend engineer lives in frontend/
-- Backend + AI lives in backend/app/
-- DevOps owns labs/
-- QA works in tests/
+- Frontend engineer
+- Backend + AI
+- DevOps
+- QA & Testing
