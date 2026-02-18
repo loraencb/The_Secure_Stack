@@ -128,3 +128,62 @@ The backend manages authentication, sessions, lab orchestration, AI analysis, an
 - Backend + AI
 - DevOps
 - QA & Testing
+
+# Current Implementation Status
+
+## Completed
+
+- Docker lab orchestration implemented for OWASP Juice Shop
+- WSL2 + Docker Desktop environment configured
+- FastAPI backend skeleton created
+- Lab control module (labs.py) implemented
+- /labs/start API endpoint
+- /labs/stop API endpoint
+- Swagger API documentation available
+- End-to-end testing verified (API → Docker → Lab)
+
+---
+# Local Development Setup
+## Database (Local SQLite)
+
+For development, the backend uses ***SQLite*** by default.
+
+Default database URL:
+
+sqlite:///./securestack.db
+
+Tables are created automatically on backend startup.
+
+The backend performs a *connection test* during startup to ensure the database is working correctly.
+
+---
+
+# Running the Project Locally
+
+## Start Backend
+
+cd backend  
+python -m venv venv  
+venv\Scripts\activate  
+pip install fastapi uvicorn  
+python -m uvicorn app.main:app --reload  
+
+Backend runs at:  
+http://127.0.0.1:8000  
+
+Swagger documentation:  
+http://127.0.0.1:8000/docs  
+
+---
+
+## Launch Vulnerable Lab
+
+Start manually:  
+docker compose -f labs/juice-shop/docker-compose.yml up -d  
+
+Or via API endpoints:  
+POST /labs/start  
+POST /labs/stop  
+
+Juice Shop runs at:  
+http://localhost:3001  
