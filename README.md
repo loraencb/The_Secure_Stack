@@ -143,6 +143,20 @@ The backend manages authentication, sessions, lab orchestration, AI analysis, an
 - End-to-end testing verified (API → Docker → Lab)
 
 ---
+# Local Development Setup
+## Database (Local SQLite)
+
+For development, the backend uses *SQLite* by default.
+
+Default database URL:
+
+sqlite:///./securestack.db
+
+Tables are created automatically on backend startup.
+
+The backend performs a *connection test* during startup to ensure the database is working correctly.
+
+---
 
 # Running the Project Locally
 
