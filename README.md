@@ -146,7 +146,7 @@ The backend manages authentication, sessions, lab orchestration, AI analysis, an
 # Local Development Setup
 ## Database (Local SQLite)
 
-For development, the backend uses *SQLite* by default.
+For development, the backend uses ***SQLite*** by default.
 
 Default database URL:
 
