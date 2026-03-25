@@ -1,53 +1,128 @@
-import { Routes, Route, Navigate, Link } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { getHealth } from "./api/client";
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
+import { useState } from "react";
+import {
+  startSession,
+  addFinding,
+  getReport,
+} from "./api/client";
 
-function Home() {
-  const [status, setStatus] = useState("Checking backend...");
-  const [error, setError] = useState("");
+export default function App() {
+  const [sessionId, setSessionId] = useState(null);
+  const [report, setReport] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await getHealth();
-        setStatus(data.status ?? JSON.stringify(data));
-      } catch (e) {
-        setError(e?.message ?? String(e));
-      }
-    })();
-  }, []);
+  const handleStartSession = async () => {
+    const res = await startSession("juice-shop");
+    setSessionId(res.id);
+  };
+
+  const handleAddFinding = async () => {
+    if (!sessionId) return alert("Start a session first!");
+
+    await addFinding({
+      session_id: sessionId,
+      title: "SQL Injection",
+      severity: "High",
+      description: "Login form vulnerable",
+    });
+
+    alert("Finding added");
+  };
+
+  const handleGenerateReport = async () => {
+    const res = await getReport(sessionId);
+    setReport(res);
+  };
 
   return (
-    <div style={{ padding: 24, fontFamily: "Arial" }}>
-      <h1>Secure Stack</h1>
+    <div style={styles.container}>
+      <h1 style={styles.title}>🔐 Secure Stack Dashboard</h1>
 
-      <h2>Backend Status</h2>
-      {error ? (
-        <p style={{ color: "red" }}>Error: {error}</p>
-      ) : (
-        <p>{status}</p>
+      {/* Controls */}
+      <div style={styles.card}>
+        <h2>Session Controls</h2>
+        <div style={styles.buttonRow}>
+          <button style={styles.button} onClick={handleStartSession}>
+            Start Session
+          </button>
+          <button style={styles.button} onClick={handleAddFinding}>
+            Add Finding
+          </button>
+          <button style={styles.button} onClick={handleGenerateReport}>
+            Generate Report
+          </button>
+        </div>
+        {sessionId && <p>Active Session ID: {sessionId}</p>}
+      </div>
+
+      {/* Report Section */}
+      {report && (
+        <div style={styles.card}>
+          <h2>📊 AI Analysis</h2>
+
+          <p>
+            <strong>Risk Level:</strong>{" "}
+            <span
+              style={{
+                color:
+                  report.analysis.risk_level === "High"
+                    ? "red"
+                    : report.analysis.risk_level === "Medium"
+                    ? "orange"
+                    : "green",
+              }}
+            >
+              {report.analysis.risk_level}
+            </span>
+          </p>
+
+          <p>{report.analysis.summary}</p>
+
+          <h3>⚠ Key Issues</h3>
+          <ul>
+            {report.analysis.key_issues.map((issue, i) => (
+              <li key={i}>{issue}</li>
+            ))}
+          </ul>
+
+          <h3>🛠 Recommendations</h3>
+          <ul>
+            {report.analysis.recommendations.map((rec, i) => (
+              <li key={i}>{rec}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
 }
 
-export default function App() {
-  return (
-    <div style={{ padding: 20 }}>
-      <nav style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-        <Link to="/">Home</Link>
-        <Link to="/login">Login</Link>
-        <Link to="/dashboard">Dashboard</Link>
-      </nav>
-
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </div>
-  );
-}
+const styles = {
+  container: {
+    padding: "30px",
+    fontFamily: "Arial",
+    backgroundColor: "#f5f7fa",
+    minHeight: "100vh",
+  },
+  title: {
+    marginBottom: "20px",
+  },
+  card: {
+    background: "white",
+    padding: "20px",
+    borderRadius: "12px",
+    boxShadow: "0 4px 10px rgba(0,0,0,0.1)",
+    marginBottom: "20px",
+  },
+  buttonRow: {
+    display: "flex",
+    gap: "10px",
+    marginBottom: "10px",
+  },
+  button: {
+    padding: "10px 16px",
+    borderRadius: "8px",
+    border: "none",
+    backgroundColor: "#1f2937",
+    color: "white",
+    cursor: "pointer",
+  },
+};

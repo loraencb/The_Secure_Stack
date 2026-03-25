@@ -1,9 +1,23 @@
-# models.py
-from sqlalchemy import Column, Integer, String
-from database import Base
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.sql import func
+from .database import Base
 
-# simple placeholder table so init_db actually creates something
-class User(Base):
-    __tablename__ = "users"
+
+class Session(Base):
+    __tablename__ = "sessions"
+
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
+    lab_name = Column(String, nullable=False)
+    status = Column(String, default="active")  # active / completed
+    start_time = Column(DateTime(timezone=True), server_default=func.now())
+    end_time = Column(DateTime(timezone=True), nullable=True)
+
+
+class Finding(Base):
+    __tablename__ = "findings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"))
+    title = Column(String)
+    severity = Column(String)
+    description = Column(String)
