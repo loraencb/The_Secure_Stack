@@ -3,7 +3,12 @@ import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
 
-export default function LiveTerminal({ sessionId, onFeedback }) {
+export default function LiveTerminal({
+  sessionId,
+  onFeedback,
+  onFindingSuggestion,
+  onFindingAutoSaved,
+}) {
   const terminalRef = useRef(null);
 
   useEffect(() => {
@@ -35,20 +40,23 @@ export default function LiveTerminal({ sessionId, onFeedback }) {
     };
 
     socket.onmessage = (event) => {
-    try {
+      try {
         const message = JSON.parse(event.data);
 
         if (message.type === "terminal_output") {
-        term.write(message.data);
+          term.write(message.data);
         } else if (message.type === "ai_feedback" && onFeedback) {
-        onFeedback(message.data);
+          onFeedback(message.data);
+        } else if (message.type === "finding_suggestion" && onFindingSuggestion) {
+          onFindingSuggestion(message.data);
+        } else if (message.type === "finding_auto_saved" && onFindingAutoSaved) {
+          onFindingAutoSaved(message.data);
         }
-    } catch {
-        // fallback if backend sends plain text
+      } catch {
         term.write(event.data);
-    }
+      }
     };
-    
+
     socket.onclose = () => {
       term.writeln("\r\n[terminal disconnected]");
     };
@@ -61,6 +69,7 @@ export default function LiveTerminal({ sessionId, onFeedback }) {
       const code = data.charCodeAt(0);
 
       if (code === 13) {
+        if (onFeedback) onFeedback(null);
         socket.send(currentLine);
         term.write("\r\n");
         currentLine = "";
@@ -83,7 +92,7 @@ export default function LiveTerminal({ sessionId, onFeedback }) {
       socket.close();
       term.dispose();
     };
-  }, [sessionId, onFeedback]);
+  }, [sessionId, onFeedback, onFindingSuggestion, onFindingAutoSaved]);
 
   return (
     <div
@@ -93,6 +102,7 @@ export default function LiveTerminal({ sessionId, onFeedback }) {
         height: "400px",
         borderRadius: "12px",
         overflow: "hidden",
+        backgroundColor: "#081427",
       }}
     />
   );

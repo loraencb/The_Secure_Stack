@@ -7,18 +7,57 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [message, setMessage] = useState("");
   const [terminalFeedback, setTerminalFeedback] = useState(null);
+  const [findingSuggestion, setFindingSuggestion] = useState(null);
   const [findings, setFindings] = useState([]);
 
   const [startingSession, setStartingSession] = useState(false);
   const [savingFinding, setSavingFinding] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
-
+  const [acceptingSuggestion, setAcceptingSuggestion] = useState(false);
+  const [labSteps, setLabSteps] = useState(null);
+  const [launchingLab, setLaunchingLab] = useState(false);
   const [findingForm, setFindingForm] = useState({
     title: "",
     severity: "Medium",
     description: "",
   });
+  const handleLaunchLab = async () => {
+    if (!sessionId) {
+      setMessage("Start a session first.");
+      return;
+    }
 
+    setLaunchingLab(true);
+    setMessage("");
+
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:8000/labs/launch/${sessionId}/juice-shop`,
+        { method: "POST" }
+      );
+
+      const data = await res.json();
+
+      setLabSteps(data.steps);
+      setMessage("Lab launched successfully.");
+    } catch (error) {
+      console.error("Lab launch error:", error);
+      setMessage("Failed to launch lab.");
+    } finally {
+      setLaunchingLab(false);
+    }
+  };
+  const handleAutoSavedFinding = (savedFinding) => {
+    setFindings((prev) => {
+      const exists = prev.some((f) => f.id === savedFinding.id);
+      if (exists) return prev;
+      return [...prev, savedFinding];
+    });
+
+    setFindingSuggestion(null);
+    setMessage(`AI auto-saved finding: ${savedFinding.title}`);
+  };
+  
   const handleStartSession = async () => {
     setStartingSession(true);
     setMessage("");
@@ -28,6 +67,7 @@ export default function App() {
       setSessionId(res.id);
       setReport(null);
       setTerminalFeedback(null);
+      setFindingSuggestion(null);
       setFindings([]);
       setMessage(`Session ${res.id} started successfully.`);
     } catch (error) {
@@ -95,6 +135,56 @@ export default function App() {
     } finally {
       setSavingFinding(false);
     }
+  };
+
+  const handleAcceptSuggestion = async () => {
+    if (!sessionId || !findingSuggestion) {
+      setMessage("No suggested finding available.");
+      return;
+    }
+
+    setAcceptingSuggestion(true);
+    setMessage("");
+
+    try {
+      const payload = {
+        session_id: sessionId,
+        title: findingSuggestion.title?.trim() || "Suggested Finding",
+        severity: findingSuggestion.severity || "Medium",
+        description: [
+          findingSuggestion.description || "",
+          findingSuggestion.evidence
+            ? `Evidence:\n${findingSuggestion.evidence}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+
+      const saved = await addFinding(payload);
+
+      setFindings((prev) => [
+        ...prev,
+        saved?.id
+          ? saved
+          : {
+              id: Date.now(),
+              ...payload,
+            },
+      ]);
+
+      setFindingSuggestion(null);
+      setMessage("Suggested finding accepted and saved.");
+    } catch (error) {
+      console.error("Accept suggested finding error:", error);
+      setMessage("Failed to save suggested finding.");
+    } finally {
+      setAcceptingSuggestion(false);
+    }
+  };
+
+  const handleDismissSuggestion = () => {
+    setFindingSuggestion(null);
   };
 
   const handleGenerateReport = async () => {
@@ -172,7 +262,7 @@ export default function App() {
     <div style={styles.page}>
       <div style={styles.header}>
         <div>
-          <h1 style={styles.title}>🔐 Secure Stack</h1>
+          <h1 style={styles.title}>Secure Stack</h1>
           <p style={styles.subtitle}>
             AI-assisted cybersecurity training dashboard
           </p>
@@ -247,6 +337,8 @@ export default function App() {
               <LiveTerminal
                 sessionId={sessionId}
                 onFeedback={setTerminalFeedback}
+                onFindingSuggestion={setFindingSuggestion}
+                onFindingAutoSaved={handleAutoSavedFinding}
               />
             ) : (
               <div style={styles.emptyState}>
@@ -276,6 +368,13 @@ export default function App() {
                   >
                     {terminalFeedback.assessment || "Unknown"}
                   </div>
+                </div>
+
+                <div>
+                  <span style={styles.label}>Phase</span>
+                  <p style={styles.paragraph}>
+                    {terminalFeedback.phase || "general-navigation"}
+                  </p>
                 </div>
 
                 <div>
@@ -317,6 +416,46 @@ export default function App() {
         <div style={styles.rightColumn}>
           <section style={styles.card}>
             <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Lab Launcher</h2>
+              <span style={styles.mutedText}>Training environment</span>
+            </div>
+
+            <button
+              style={styles.primaryButton}
+              onClick={handleLaunchLab}
+              disabled={!sessionId || launchingLab}
+            >
+              {launchingLab ? "Launching..." : "Launch Juice Shop Lab"}
+            </button>
+          </section>
+
+          {labSteps && (
+            <section style={styles.card}>
+              <div style={styles.cardHeader}>
+                <h2 style={styles.cardTitle}>Lab Guide</h2>
+                <span style={styles.mutedText}>Step-by-step instructions</span>
+              </div>
+
+              <div style={styles.feedbackStack}>
+                {labSteps.map((step, i) => (
+                  <div key={i}>
+                    <span style={styles.label}>
+                      Step {i + 1}: {step.title}
+                    </span>
+
+                    <p style={styles.paragraph}>{step.instruction}</p>
+
+                    <code style={styles.commandChip}>
+                      {step.command_hint}
+                    </code>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Suggested Demo Commands</h2>
               <span style={styles.mutedText}>Use these during presentation</span>
             </div>
@@ -329,6 +468,63 @@ export default function App() {
               ))}
             </div>
           </section>
+
+          {findingSuggestion && (
+            <section style={styles.card}>
+              <div style={styles.cardHeader}>
+                <h2 style={styles.cardTitle}>Suggested Finding</h2>
+                <span style={styles.mutedText}>Detected from terminal output</span>
+              </div>
+
+              <div style={styles.feedbackStack}>
+                <div>
+                  <span style={styles.label}>Title</span>
+                  <p style={styles.paragraph}>
+                    {findingSuggestion.title || "Untitled finding"}
+                  </p>
+                </div>
+
+                <div>
+                  <span style={styles.label}>Severity</span>
+                  <div style={severityBadgeStyle(findingSuggestion.severity)}>
+                    {findingSuggestion.severity || "Medium"}
+                  </div>
+                </div>
+
+                <div>
+                  <span style={styles.label}>Description</span>
+                  <p style={styles.paragraph}>
+                    {findingSuggestion.description || "No description available."}
+                  </p>
+                </div>
+
+                <div>
+                  <span style={styles.label}>Evidence</span>
+                  <pre style={styles.evidenceBox}>
+                    {findingSuggestion.evidence || "No evidence provided."}
+                  </pre>
+                </div>
+
+                <div style={styles.buttonRow}>
+                  <button
+                    style={styles.primaryButton}
+                    onClick={handleAcceptSuggestion}
+                    disabled={!sessionId || acceptingSuggestion}
+                  >
+                    {acceptingSuggestion ? "Saving..." : "Accept Finding"}
+                  </button>
+
+                  <button
+                    style={styles.secondaryButton}
+                    onClick={handleDismissSuggestion}
+                    disabled={acceptingSuggestion}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
 
           <section style={styles.card}>
             <div style={styles.cardHeader}>
@@ -576,6 +772,11 @@ const styles = {
     color: "#374151",
     cursor: "pointer",
   },
+  buttonRow: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
   statusBadge: {
     padding: "6px 10px",
     borderRadius: "999px",
@@ -709,11 +910,22 @@ const styles = {
     margin: 0,
     color: "#374151",
     lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
   },
   list: {
     margin: 0,
     paddingLeft: "18px",
     color: "#1f2937",
     lineHeight: 1.6,
+  },
+  evidenceBox: {
+    margin: 0,
+    padding: "12px",
+    borderRadius: "10px",
+    backgroundColor: "#0f172a",
+    color: "#e2e8f0",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontSize: "13px",
   },
 };
