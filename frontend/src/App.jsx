@@ -16,6 +16,8 @@ export default function App() {
   const [acceptingSuggestion, setAcceptingSuggestion] = useState(false);
   const [labSteps, setLabSteps] = useState(null);
   const [launchingLab, setLaunchingLab] = useState(false);
+  const [currentLabStep, setCurrentLabStep] = useState(0);
+  const [completedSteps, setCompletedSteps] = useState([]);
   const [findingForm, setFindingForm] = useState({
     title: "",
     severity: "Medium",
@@ -26,6 +28,8 @@ export default function App() {
     setStartingSession(true);
     setMessage("");
 
+    setCurrentLabStep(0);
+    setCompletedSteps([]);
     try {
       const res = await startSession("juice-shop");
       setSessionId(res.id);
@@ -52,7 +56,8 @@ export default function App() {
 
     setLaunchingLab(true);
     setMessage("");
-
+    setCurrentLabStep(0);
+    setCompletedSteps([]);
     try {
       const res = await fetch(
         `http://127.0.0.1:8000/labs/launch/${sessionId}/juice-shop-recon`,
@@ -75,7 +80,41 @@ export default function App() {
       setLaunchingLab(false);
     }
   };
+  
+  const normalizeCommand = (command) => command.trim().toLowerCase();
 
+  const commandMatchesStep = (command, hint) => {
+    const c = normalizeCommand(command);
+    const h = normalizeCommand(hint);
+
+    if (h.includes("ping") && c.includes("ping")) return true;
+    if (h.includes("nmap") && c.includes("nmap")) return true;
+    if (h.includes("curl") && c.includes("curl")) return true;
+    if (h.startsWith("http://") || h.startsWith("https://")) return false;
+
+    return c === h;
+  };
+
+  const handleCommandSubmitted = useCallback(
+    (command) => {
+      if (!labSteps || labSteps.length === 0) return;
+      if (currentLabStep >= labSteps.length) return;
+
+      const activeStep = labSteps[currentLabStep];
+      const expectedHint = activeStep?.command_hint || "";
+
+      if (commandMatchesStep(command, expectedHint)) {
+        setCompletedSteps((prev) => {
+          if (prev.includes(currentLabStep)) return prev;
+          return [...prev, currentLabStep];
+        });
+
+        setCurrentLabStep((prev) => prev + 1);
+        setMessage(`Step ${currentLabStep + 1} completed.`);
+      }
+    },
+    [labSteps, currentLabStep]
+  );
   const handleAutoSavedFinding = useCallback((savedFinding) => {
     setFindings((prev) => {
       const exists = prev.some((f) => f.id === savedFinding.id);
@@ -357,6 +396,7 @@ export default function App() {
                 onFeedback={handleTerminalFeedback}
                 onFindingSuggestion={handleFindingSuggestion}
                 onFindingAutoSaved={handleAutoSavedFinding}
+                onCommandSubmitted={handleCommandSubmitted}
               />
             ) : (
               <div style={styles.emptyState}>
@@ -459,38 +499,64 @@ export default function App() {
                   <strong>Browser URL:</strong> {labInfo.browser_url}
                 </p>
               )}
+
               <div style={styles.feedbackStack}>
-                {labSteps.map((step, i) => (
-                  <div key={i}>
-                    <span style={styles.label}>
-                      Step {i + 1}: {step.title}
-                    </span>
+                {labSteps.map((step, i) => {
+                  const isCompleted = completedSteps.includes(i);
+                  const isActive = i === currentLabStep;
+                  const isLocked = i > currentLabStep;
 
-                    <p style={styles.paragraph}>{step.instruction}</p>
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        ...styles.stepCard,
+                        borderColor: isCompleted
+                          ? "#16a34a"
+                          : isActive
+                          ? "#2563eb"
+                          : "#e5e7eb",
+                        backgroundColor: isCompleted
+                          ? "#f0fdf4"
+                          : isActive
+                          ? "#eff6ff"
+                          : "#ffffff",
+                        opacity: isLocked ? 0.75 : 1,
+                      }}
+                    >
+                      <div style={styles.cardHeader}>
+                        <span style={styles.label}>
+                          Step {i + 1}: {step.title}
+                        </span>
 
-                    <code style={styles.commandChip}>
-                      {step.command_hint}
-                    </code>
-                  </div>
-                ))}
+                        <span
+                          style={{
+                            ...styles.statusBadge,
+                            backgroundColor: isCompleted
+                              ? "#dcfce7"
+                              : isActive
+                              ? "#dbeafe"
+                              : "#e5e7eb",
+                            color: isCompleted
+                              ? "#166534"
+                              : isActive
+                              ? "#1d4ed8"
+                              : "#374151",
+                          }}
+                        >
+                          {isCompleted ? "Completed" : isActive ? "Current" : "Pending"}
+                        </span>
+                      </div>
+
+                      <p style={styles.paragraph}>{step.instruction}</p>
+
+                      <code style={styles.commandChip}>{step.command_hint}</code>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
-          
-          <section style={styles.card}>
-            <div style={styles.cardHeader}>
-              <h2 style={styles.cardTitle}>Suggested Demo Commands</h2>
-              <span style={styles.mutedText}>Use these during presentation</span>
-            </div>
-
-            <div style={styles.commandList}>
-              {demoCommands.map((cmd) => (
-                <code key={cmd} style={styles.commandChip}>
-                  {cmd}
-                </code>
-              ))}
-            </div>
-          </section>
 
           {findingSuggestion && (
             <section style={styles.card}>
@@ -950,5 +1016,10 @@ const styles = {
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     fontSize: "13px",
+  },
+  stepCard: {
+  border: "1px solid #e5e7eb",
+  borderRadius: "12px",
+  padding: "14px",
   },
 };

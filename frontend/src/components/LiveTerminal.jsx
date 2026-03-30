@@ -8,15 +8,16 @@ export default function LiveTerminal({
   onFeedback,
   onFindingSuggestion,
   onFindingAutoSaved,
+  onCommandSubmitted,
 }) {
   const terminalRef = useRef(null);
   const termInstanceRef = useRef(null);
   const socketRef = useRef(null);
-  const fitAddonRef = useRef(null);
 
   const onFeedbackRef = useRef(onFeedback);
   const onFindingSuggestionRef = useRef(onFindingSuggestion);
   const onFindingAutoSavedRef = useRef(onFindingAutoSaved);
+  const onCommandSubmittedRef = useRef(onCommandSubmitted);
 
   useEffect(() => {
     onFeedbackRef.current = onFeedback;
@@ -29,6 +30,10 @@ export default function LiveTerminal({
   useEffect(() => {
     onFindingAutoSavedRef.current = onFindingAutoSaved;
   }, [onFindingAutoSaved]);
+
+  useEffect(() => {
+    onCommandSubmittedRef.current = onCommandSubmitted;
+  }, [onCommandSubmitted]);
 
   useEffect(() => {
     if (!sessionId || !terminalRef.current) return;
@@ -50,7 +55,6 @@ export default function LiveTerminal({
     fitAddon.fit();
 
     termInstanceRef.current = term;
-    fitAddonRef.current = fitAddon;
 
     const socket = new WebSocket(`ws://127.0.0.1:8000/ws/terminal/${sessionId}`);
     socketRef.current = socket;
@@ -98,7 +102,13 @@ export default function LiveTerminal({
       const code = data.charCodeAt(0);
 
       if (code === 13) {
+        const submitted = currentLine.trim();
+
         if (onFeedbackRef.current) onFeedbackRef.current(null);
+        if (submitted && onCommandSubmittedRef.current) {
+          onCommandSubmittedRef.current(submitted);
+        }
+
         socket.send(currentLine);
         term.write("\r\n");
         currentLine = "";
