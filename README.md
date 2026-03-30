@@ -1,265 +1,284 @@
-# The Secure Stack
+# Secure Stack
 
-![Python](https://img.shields.io/badge/backend-FastAPI-green)
-![React](https://img.shields.io/badge/frontend-React-blue)
-![Docker](https://img.shields.io/badge/environment-Docker-blue)
-![AI](https://img.shields.io/badge/AI-Ollama%20LLM-purple)
-![Status](https://img.shields.io/badge/status-Demo%20Ready-success)
-
-> An **AI-assisted cybersecurity training platform** that provides real-time guidance, automated findings detection, and structured penetration testing labs.
+A web-based cybersecurity training platform designed for classroom use, combining hands-on penetration testing labs with structured instruction and real-time AI-assisted guidance.
 
 ---
 
 ## Overview
 
-**The Secure Stack** is an interactive cybersecurity training environment that combines:
+Secure Stack is an instructional cyber training environment that integrates:
 
-- Hands-on penetration testing labs
-- Real Linux terminal access (Docker-based)
-- AI-powered analysis and guidance
-- Automated reporting and findings tracking
-- Guided lab progression (step-by-step learning)
+- Containerized vulnerable lab environments
+- Structured lab manuals and guided exercises
+- Real-time terminal-aware AI coaching
+- Session tracking and assessment tools
 
-The platform simulates real-world pentesting workflows while helping users learn as they go.
+The system is designed to support cybersecurity education by allowing students to learn through direct interaction with realistic environments while receiving continuous feedback on their actions.
+
+---
+
+## Core Concept
+
+Each lab in Secure Stack is a complete instructional module composed of:
+
+1. Lab Environment  
+   A containerized vulnerable system deployed per session.
+
+2. Lab Manual  
+   A structured guide including objectives, tasks, and reflection questions.
+
+3. Real-Time Coaching Engine  
+   An AI-driven system that observes terminal activity and provides contextual feedback.
+
+4. Assessment Layer  
+   Tracks progress, task completion, and student submissions.
+
+This combination transforms the platform from a simple lab launcher into a classroom-ready training system.
 
 ---
 
 ## Key Features
 
-### Lab Environment
-- Launch isolated lab environments per session
-- Includes:
-  - Attacker machine (Linux container)
-  - Target machine (vulnerable application)
-  - Private network between containers
-- Example lab: **OWASP Juice Shop Recon Lab**
+### Interactive Lab Environments
+- Launch and manage isolated lab environments using Docker
+- Per-session container orchestration
+- Reset and stop functionality
+- Initial labs include:
+  - OWASP Juice Shop
+  - DVWA
 
 ---
 
-### Live Terminal
-- Fully interactive Linux shell inside attacker container
-- Executes real commands (`nmap`, `curl`, etc.)
-- WebSocket-powered real-time streaming
+### Structured Lab Manuals
+Each lab includes:
+- Learning objectives
+- Prerequisites
+- Step-by-step tasks
+- Reflection questions
+- Submission requirements
+- Ethical use guidelines
+
+Manuals are stored in Markdown and version-controlled.
 
 ---
 
-### AI Assistant (Ollama)
-- Analyzes every command + output
-- Classifies actions into:
-  - reconnaissance
-  - enumeration
-  - exploitation
-  - post-exploitation
+### Real-Time AI Coaching
+
+The platform includes a terminal-aware AI system that:
+
+- Monitors commands and output in real time
+- Identifies the current phase of the exercise
+- Detects incorrect or inefficient actions
 - Provides:
-  - explanations
-  - security relevance
-  - next steps
+  - Explanations of tool output
+  - Guidance on next steps
+  - Warnings when off-track
+  - Reinforcement of correct methodology
+
+The AI operates as an active observer, not a passive chatbot.
 
 ---
 
-### Automatic Findings Detection
-- AI detects security-relevant results from terminal output
-- Automatically suggests findings:
-  - open ports
-  - exposed services
-  - vulnerable endpoints
-- One-click accept → saved to report
+### Session Tracking
+
+- Tracks commands executed during a session
+- Stores tool outputs and notes
+- Maintains session state and progress
+- Enables replay and review of activity
 
 ---
 
-### Guided Lab Progression
-- Step-by-step lab instructions
-- Tracks user progress automatically
-- Unlocks next step when correct command is executed
-- Visual status:
-  - Completed
-  - Current
-  - Pending
+### Assessment and Submissions
+
+- Task-based lab structure
+- Student submissions per task
+- Evidence collection
+- Progress tracking
+- Instructor review capability
 
 ---
 
-### Reporting System
-- Automatically builds a report during the session
-- Includes:
-  - findings
-  - severity levels
-  - AI-generated summary
-  - recommendations
+## System Architecture
 
----
-
-## Architecture
-```text
-Frontend (React)
-↓
-WebSocket + REST API
-↓
-Backend (FastAPI)
-├── Terminal Manager (Docker exec)
-├── Lab Service (Docker containers + networks)
-├── AI Service (Ollama)
-├── Findings + Reports API
-↓
-Docker Engine
-├── Attacker Container
-├── Target Container
-└── Lab Network
-```
----
-
-## Tech Stack
+### Frontend
+- React or Next.js
+- Displays lab manuals, terminal interface, and AI feedback
+- Real-time updates via WebSockets
 
 ### Backend
 - FastAPI
-- Python
-- Docker SDK
-- WebSockets (real-time terminal)
-- Ollama (LLM inference)
+- Handles:
+  - Authentication
+  - Session lifecycle
+  - Lab orchestration
+  - Command logging
+  - AI integration
 
-### Frontend
-- React
-- xterm.js (terminal UI)
-- Fetch API
+### Database
+- PostgreSQL
+- Stores:
+  - Users
+  - Labs
+  - Sessions
+  - Commands
+  - Submissions
+  - AI observations
 
-### Infrastructure
-- Docker (containerized labs)
-- Localhost networking
+### Lab Infrastructure
+- Docker / Docker Compose
+- Isolated environments per session
+- Dynamic container lifecycle management
 
----
-
-## Installation & Setup
-
-### 1. Clone the repository
-
-git clone https://github.com/loraencb/The_Secure_Stack.git
-cd The_Secure_Stack
-
----
-
-### 2. Start Docker
-
-Ensure Docker Desktop is running:
-
-docker ps
-
----
-
-### 3. Run Ollama (AI)
-
-ollama run llama3
+### AI Layer
+- LLM-based coaching engine
+- Context-aware feedback using:
+  - Recent commands
+  - Tool outputs
+  - Lab objectives
+  - Session state
 
 ---
 
-### 4. Backend Setup
+## Project Structure
+```text
+secure-stack/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── models/
+│   │   ├── services/
+│   │   └── main.py
+│   ├── tests/
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── src/
+│   └── package.json
+│
+├── labs/
+│   ├── juice-shop/
+│   │   ├── docker-compose.yml
+│   │   ├── metadata.json
+│   │   ├── student_manual.md
+│   │   └── instructor_guide.md
+│   └── dvwa/
+│
+├── docs/
+└── README.md
+```
+---
 
-cd backend
+## Lab Module Design
 
-pip install -r requirements.txt
+Each lab is self-contained and includes:
 
-uvicorn app.main:app --reload
+- Docker environment configuration
+- Metadata definition
+- Student manual (Markdown)
+- Instructor guide
+- Task and checkpoint definitions
 
-Backend runs at:
-http://127.0.0.1:8000
+Example:
+
+labs/juice-shop/
+├── docker-compose.yml
+├── metadata.json
+├── student_manual.md
+├── instructor_guide.md
+└── rubric.json
 
 ---
 
-### 5. Frontend Setup
+## Session Workflow
 
-cd frontend
-
-npm install
-npm run dev
-
-Frontend runs at:
-http://localhost:5173
-
----
-
-## How to Use
-
-### 1. Start a Session
-Click **Start Session**
+1. User logs in
+2. User selects a lab
+3. Backend creates a session
+4. Lab environment is launched via Docker
+5. User interacts with the target
+6. Terminal activity is captured
+7. AI coaching engine provides real-time feedback
+8. User completes tasks and submits responses
+9. Session is closed and summarized
 
 ---
 
-### 2. Launch Lab
-Click **Launch Juice Shop Lab**
+## AI Coaching Workflow
+
+1. Terminal events are captured (commands, output)
+2. Events are processed and classified
+3. Session state is updated
+4. Relevant context is built
+5. AI generates feedback when appropriate
+6. Feedback is displayed in real time
 
 ---
 
-### 3. Follow Guided Steps
+## Security Considerations
 
-ping -c 3 target
-nmap -sV target
-curl http://target:3000
-
----
-
-### 4. Observe AI Feedback
-- Real-time explanations
-- Suggested next actions
+- All labs run in isolated Docker networks
+- No direct user access to host system
+- Backend mediates all container operations
+- Session-based resource control
+- Controlled lab images only
 
 ---
 
-### 5. Capture Findings
-- Auto-detected OR manual
-- Stored instantly
+## MVP Scope
+
+The initial version includes:
+
+- User authentication
+- Lab selection interface
+- One fully functional lab (Juice Shop)
+- Lab manual integration
+- Session-based container launch
+- Command and activity logging
+- Real-time AI coaching (basic)
+- Session summary generation
 
 ---
 
-### 6. Generate Report
-Click **Generate Report**
+## Future Enhancements
+
+- Additional lab modules
+- Advanced checkpoint detection
+- Instructor dashboard
+- Automated grading
+- Vector database for retrieval-based coaching
+- Multi-user classroom management
+- VM-based environments
+- Terminal emulation (xterm.js)
 
 ---
 
-## Example Lab: Juice Shop Recon
+## Educational Use Case
 
-- Target: OWASP Juice Shop
-- Vulnerabilities:
-  - exposed web app
-  - discoverable via scanning
-- Learning objectives:
-  - network recon
-  - service enumeration
-  - web discovery
+Secure Stack is designed to support:
 
----
+- Undergraduate cybersecurity courses
+- Hands-on lab sessions
+- Guided penetration testing exercises
+- Independent student practice
+- Instructor-led demonstrations
 
-## Known Limitations
-
-- Terminal runs without full TTY (minor bash warnings)
-- Labs are local (not cloud-deployed)
-- Limited lab variety (expandable)
-- No authentication system (demo-focused)
-
----
-
-## Future Improvements
-
-- More labs (Metasploitable, DVWA, etc.)
-- Smarter AI (context-aware sessions)
-- Remote lab hosting
-- Multi-user support
-- Advanced reporting dashboards
-- Terminal output highlighting
-
----
-
-## Contributors
-
-- Braulio Lora Encarnacion
-- Team Secure Stack
+The platform enables scalable instruction by augmenting human teaching with real-time AI feedback.
 
 ---
 
 ## License
 
-This project is for **educational and research purposes only**.
+This project is intended for educational and research purposes.
+
+All lab environments must be used in controlled settings and in accordance with ethical cybersecurity practices.
 
 ---
 
-## Final Note
+## Status
 
-The Secure Stack is more than a tool — it is a **learning platform** that bridges:
+In active development.
 
-> Hands-on cybersecurity practice + AI-driven guidance
+Initial focus:
+- Core lab orchestration
+- Lab manual integration
+- Real-time AI coaching engine
