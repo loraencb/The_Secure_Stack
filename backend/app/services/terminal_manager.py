@@ -1,15 +1,16 @@
+import queue
 import subprocess
 import threading
-import queue
 
 
 class TerminalSession:
-    def __init__(self, process, output_queue):
+    def __init__(self, process, output_queue, container_name: str):
         self.process = process
         self.output_queue = output_queue
+        self.container_name = container_name
 
 
-def _reader_thread(pipe, output_queue, prefix=""):
+def _reader_thread(pipe, output_queue, prefix: str = ""):
     try:
         while True:
             data = pipe.readline()
@@ -19,15 +20,18 @@ def _reader_thread(pipe, output_queue, prefix=""):
     except Exception as exc:
         output_queue.put(f"\r\n[reader error] {exc}\r\n")
 
+
 def _container_is_running(container_name: str) -> bool:
     result = subprocess.run(
         ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
         capture_output=True,
         text=True,
+        check=False,
     )
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
-def create_terminal_session(session_id: int):
+
+def create_terminal_session(session_id: int) -> TerminalSession:
     container_name = f"attacker-{session_id}"
 
     if not _container_is_running(container_name):
@@ -67,10 +71,10 @@ def create_terminal_session(session_id: int):
     stdout_thread.start()
     stderr_thread.start()
 
-    return TerminalSession(process, output_queue)
+    return TerminalSession(process, output_queue, container_name)
 
 
-def write_to_terminal(session: TerminalSession, command: str):
+def write_to_terminal(session: TerminalSession, command: str) -> None:
     if session.process.poll() is not None:
         raise RuntimeError(
             f"Terminal process exited with code {session.process.returncode}"
@@ -83,7 +87,7 @@ def write_to_terminal(session: TerminalSession, command: str):
     session.process.stdin.flush()
 
 
-def read_from_terminal(session: TerminalSession):
+def read_from_terminal(session: TerminalSession) -> str:
     chunks = []
     while True:
         try:
@@ -93,11 +97,17 @@ def read_from_terminal(session: TerminalSession):
     return "".join(chunks)
 
 
-def cleanup_terminal_session(session: TerminalSession):
+def cleanup_terminal_session(session: TerminalSession) -> None:
     if not session:
         return
 
     try:
+        if session.process.stdin:
+            try:
+                session.process.stdin.close()
+            except Exception:
+                pass
+
         if session.process.poll() is None:
             session.process.terminate()
             session.process.wait(timeout=3)

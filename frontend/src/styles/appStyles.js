@@ -1,0 +1,290 @@
+export const riskColor = {
+  High: "#dc2626",
+  Medium: "#d97706",
+  Low: "#16a34a",
+};
+
+export const assessmentColor = {
+  useful: "#16a34a",
+  neutral: "#2563eb",
+  risky: "#d97706",
+  incorrect: "#dc2626",
+};
+
+export const severityBadgeStyle = (severity) => ({
+  display: "inline-block",
+  padding: "4px 10px",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: 700,
+  color: "#fff",
+  backgroundColor:
+    severity === "High"
+      ? "#dc2626"
+      : severity === "Medium"
+      ? "#d97706"
+      : "#16a34a",
+});
+
+export const styles = {
+  page: {
+    minHeight: "100vh",
+    backgroundColor: "#f3f6fb",
+    padding: "24px",
+    fontFamily: "Arial, sans-serif",
+    color: "#111827",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "16px",
+    marginBottom: "20px",
+    flexWrap: "wrap",
+  },
+  title: {
+    margin: 0,
+    fontSize: "32px",
+    color: "#0f172a",
+  },
+  subtitle: {
+    margin: "6px 0 0",
+    color: "#64748b",
+    fontSize: "15px",
+  },
+  headerActions: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+  banner: {
+    marginBottom: "20px",
+    backgroundColor: "#e0f2fe",
+    color: "#075985",
+    border: "1px solid #bae6fd",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    fontWeight: 600,
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1.5fr 1fr",
+    gap: "20px",
+  },
+  leftColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+  rightColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+  card: {
+    background: "#ffffff",
+    padding: "20px",
+    borderRadius: "16px",
+    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+    border: "1px solid #e5e7eb",
+  },
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "14px",
+    flexWrap: "wrap",
+  },
+  cardTitle: {
+    margin: 0,
+    fontSize: "20px",
+    color: "#0f172a",
+  },
+  mutedText: {
+    color: "#6b7280",
+    fontSize: "13px",
+  },
+  primaryButton: {
+    padding: "11px 16px",
+    borderRadius: "10px",
+    border: "none",
+    backgroundColor: "#111827",
+    color: "#ffffff",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  secondaryButton: {
+    padding: "11px 16px",
+    borderRadius: "10px",
+    border: "1px solid #cbd5e1",
+    backgroundColor: "#ffffff",
+    color: "#111827",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  ghostButton: {
+    padding: "8px 12px",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    backgroundColor: "#ffffff",
+    color: "#374151",
+    cursor: "pointer",
+  },
+  buttonRow: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+  statusBadge: {
+    padding: "6px 10px",
+    borderRadius: "999px",
+    fontSize: "12px",
+    fontWeight: 700,
+  },
+  metaGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "12px",
+  },
+  metaItem: {
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "12px",
+  },
+  metaLabel: {
+    display: "block",
+    fontSize: "12px",
+    color: "#64748b",
+    marginBottom: "6px",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+  metaValue: {
+    fontWeight: 700,
+    color: "#111827",
+  },
+  emptyState: {
+    padding: "18px",
+    borderRadius: "12px",
+    backgroundColor: "#f8fafc",
+    border: "1px dashed #cbd5e1",
+    color: "#64748b",
+  },
+  feedbackStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  },
+  reportStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  },
+  label: {
+    display: "block",
+    fontSize: "12px",
+    fontWeight: 700,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    marginBottom: "6px",
+  },
+  valuePill: {
+    display: "inline-block",
+    color: "#fff",
+    borderRadius: "999px",
+    padding: "6px 12px",
+    fontSize: "13px",
+    fontWeight: 700,
+  },
+  paragraph: {
+    margin: 0,
+    lineHeight: 1.6,
+    color: "#1f2937",
+  },
+  warningBox: {
+    backgroundColor: "#fff7ed",
+    border: "1px solid #fdba74",
+    color: "#9a3412",
+    padding: "12px",
+    borderRadius: "12px",
+  },
+  commandChip: {
+    backgroundColor: "#0f172a",
+    color: "#f8fafc",
+    padding: "8px 10px",
+    borderRadius: "10px",
+    fontSize: "13px",
+  },
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  input: {
+    padding: "11px 12px",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    fontSize: "14px",
+    outline: "none",
+  },
+  textarea: {
+    padding: "11px 12px",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    fontSize: "14px",
+    resize: "vertical",
+    outline: "none",
+  },
+  findingsList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  findingCard: {
+    padding: "14px",
+    borderRadius: "12px",
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e5e7eb",
+  },
+  findingTopRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    alignItems: "center",
+    marginBottom: "8px",
+    flexWrap: "wrap",
+  },
+  findingTitle: {
+    color: "#0f172a",
+  },
+  findingDescription: {
+    margin: 0,
+    color: "#374151",
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+  },
+  list: {
+    margin: 0,
+    paddingLeft: "18px",
+    color: "#1f2937",
+    lineHeight: 1.6,
+  },
+  evidenceBox: {
+    margin: 0,
+    padding: "12px",
+    borderRadius: "10px",
+    backgroundColor: "#0f172a",
+    color: "#e2e8f0",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontSize: "13px",
+  },
+  stepCard: {
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "14px",
+  },
+};

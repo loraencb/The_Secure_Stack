@@ -12,7 +12,10 @@ export default function LiveTerminal({
 }) {
   const terminalRef = useRef(null);
   const termInstanceRef = useRef(null);
+  const fitAddonRef = useRef(null);
   const socketRef = useRef(null);
+  const currentLineRef = useRef("");
+  const resizeObserverRef = useRef(null);
 
   const onFeedbackRef = useRef(onFeedback);
   const onFindingSuggestionRef = useRef(onFindingSuggestion);
@@ -36,7 +39,9 @@ export default function LiveTerminal({
   }, [onCommandSubmitted]);
 
   useEffect(() => {
-    if (!sessionId || !terminalRef.current) return;
+    if (!sessionId || !terminalRef.current) {
+      return undefined;
+    }
 
     const term = new Terminal({
       cursorBlink: true,
@@ -50,16 +55,17 @@ export default function LiveTerminal({
     });
 
     const fitAddon = new FitAddon();
+    fitAddonRef.current = fitAddon;
+
     term.loadAddon(fitAddon);
     term.open(terminalRef.current);
     fitAddon.fit();
 
     termInstanceRef.current = term;
+    currentLineRef.current = "";
 
     const socket = new WebSocket(`ws://127.0.0.1:8000/ws/terminal/${sessionId}`);
     socketRef.current = socket;
-
-    let currentLine = "";
 
     socket.onopen = () => {
       term.writeln(`[connected to session ${sessionId}]`);
@@ -72,21 +78,30 @@ export default function LiveTerminal({
 
         if (message.type === "terminal_output") {
           term.write(message.data);
-        } else if (message.type === "ai_feedback" && onFeedbackRef.current) {
+          return;
+        }
+
+        if (message.type === "ai_feedback" && onFeedbackRef.current) {
           onFeedbackRef.current(message.data);
-        } else if (
+          return;
+        }
+
+        if (
           message.type === "finding_suggestion" &&
           onFindingSuggestionRef.current
         ) {
           onFindingSuggestionRef.current(message.data);
-        } else if (
+          return;
+        }
+
+        if (
           message.type === "finding_auto_saved" &&
           onFindingAutoSavedRef.current
         ) {
           onFindingAutoSavedRef.current(message.data);
         }
       } catch {
-        term.write(event.data);
+        term.write(String(event.data));
       }
     };
 
@@ -98,36 +113,75 @@ export default function LiveTerminal({
       term.writeln("\r\n[terminal socket error]");
     };
 
-    term.onData((data) => {
+    const dataDisposable = term.onData((data) => {
+      const socketReady = socket.readyState === WebSocket.OPEN;
+
+      if (!socketReady) {
+        return;
+      }
+
       const code = data.charCodeAt(0);
 
       if (code === 13) {
-        const submitted = currentLine.trim();
+        const submitted = currentLineRef.current.trim();
 
-        if (onFeedbackRef.current) onFeedbackRef.current(null);
+        if (onFeedbackRef.current) {
+          onFeedbackRef.current(null);
+        }
+
         if (submitted && onCommandSubmittedRef.current) {
           onCommandSubmittedRef.current(submitted);
         }
 
-        socket.send(currentLine);
+        socket.send(currentLineRef.current);
         term.write("\r\n");
-        currentLine = "";
-      } else if (code === 127) {
-        if (currentLine.length > 0) {
-          currentLine = currentLine.slice(0, -1);
+        currentLineRef.current = "";
+        return;
+      }
+
+      if (code === 127) {
+        if (currentLineRef.current.length > 0) {
+          currentLineRef.current = currentLineRef.current.slice(0, -1);
           term.write("\b \b");
         }
-      } else {
-        currentLine += data;
-        term.write(data);
+        return;
       }
+
+      if (code < 32 && code !== 9) {
+        return;
+      }
+
+      currentLineRef.current += data;
+      term.write(data);
     });
 
-    const handleResize = () => fitAddon.fit();
+    const handleResize = () => {
+      try {
+        fitAddon.fit();
+      } catch {
+        // ignore fit errors during teardown/resizing
+      }
+    };
+
     window.addEventListener("resize", handleResize);
+
+    if (typeof ResizeObserver !== "undefined") {
+      const resizeObserver = new ResizeObserver(() => {
+        handleResize();
+      });
+      resizeObserver.observe(terminalRef.current);
+      resizeObserverRef.current = resizeObserver;
+    }
 
     return () => {
       window.removeEventListener("resize", handleResize);
+
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current = null;
+      }
+
+      dataDisposable.dispose();
 
       if (socketRef.current) {
         socketRef.current.close();
@@ -138,6 +192,9 @@ export default function LiveTerminal({
         termInstanceRef.current.dispose();
         termInstanceRef.current = null;
       }
+
+      fitAddonRef.current = null;
+      currentLineRef.current = "";
     };
   }, [sessionId]);
 

@@ -2,17 +2,22 @@ import json
 import requests
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+MODEL_NAME = "llama3"
 
 
-def build_prompt(findings):
-    formatted = "\n".join(
-        [f"- {f.title} ({f.severity}): {f.description}" for f in findings]
-    )
+def build_prompt(findings) -> str:
+    if not findings:
+        formatted = "No findings were recorded for this session."
+    else:
+        formatted = "\n".join(
+            f"- {finding.title} ({finding.severity}): {finding.description}"
+            for finding in findings
+        )
 
     return f"""
-You are a cybersecurity expert.
+You are a cybersecurity expert preparing a concise pentest report summary.
 
-Analyze the following vulnerabilities:
+Analyze the following findings:
 
 {formatted}
 
@@ -25,27 +30,26 @@ Return ONLY valid JSON in this exact format:
   "summary": "brief professional explanation"
 }}
 
-Do not include markdown.
-Do not include triple backticks.
-Do not include any text before or after the JSON.
-"""
+Rules:
+- Do not include markdown
+- Do not include triple backticks
+- Do not include any text before or after the JSON
+- Return exactly one JSON object
+""".strip()
 
 
 def extract_json_object(text: str) -> str:
     text = text.strip()
 
-    # remove markdown fences if model adds them
     if text.startswith("```"):
         text = text.replace("```json", "").replace("```", "").strip()
 
-    # keep only content from first { to last }
     start = text.find("{")
     end = text.rfind("}")
 
     if start != -1 and end != -1 and end > start:
         return text[start:end + 1]
 
-    # if opening brace exists but closing brace is missing, try repairing it
     if start != -1 and end == -1:
         repaired = text[start:]
         open_braces = repaired.count("{")
@@ -56,33 +60,65 @@ def extract_json_object(text: str) -> str:
     return text
 
 
-def generate_summary(findings):
+def _default_summary(warning: str = "") -> dict:
+    return {
+        "risk_level": "Low",
+        "key_issues": [],
+        "recommendations": [],
+        "summary": "No structured AI summary was available.",
+        "warning": warning[:500] if warning else "",
+    }
+
+
+def _normalize_summary(data: dict) -> dict:
+    normalized = _default_summary()
+
+    risk_level = data.get("risk_level", normalized["risk_level"])
+    if risk_level not in {"Low", "Medium", "High"}:
+        risk_level = "Low"
+
+    key_issues = data.get("key_issues", [])
+    if not isinstance(key_issues, list):
+        key_issues = []
+
+    recommendations = data.get("recommendations", [])
+    if not isinstance(recommendations, list):
+        recommendations = []
+
+    summary = data.get("summary", normalized["summary"])
+    if not isinstance(summary, str):
+        summary = normalized["summary"]
+
+    normalized["risk_level"] = risk_level
+    normalized["key_issues"] = [str(item) for item in key_issues]
+    normalized["recommendations"] = [str(item) for item in recommendations]
+    normalized["summary"] = summary
+
+    return normalized
+
+
+def generate_summary(findings) -> dict:
     prompt = build_prompt(findings)
 
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": "llama3",
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0
-            }
-        },
-        timeout=60,
-    )
-
-    response.raise_for_status()
-    data = response.json()
-    raw = data.get("response", "{}")
-
-    cleaned = extract_json_object(raw)
-
     try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        return {
-            "error": "AI parsing failed",
-            "raw_output": raw,
-            "cleaned_output": cleaned,
-        }
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": MODEL_NAME,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0},
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        raw = data.get("response", "{}")
+        cleaned = extract_json_object(raw)
+
+        parsed = json.loads(cleaned)
+        return _normalize_summary(parsed)
+
+    except Exception as exc:
+        return _default_summary(str(exc))

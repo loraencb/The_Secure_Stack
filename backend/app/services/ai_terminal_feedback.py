@@ -41,34 +41,11 @@ Tasks:
 
 6. Detect whether the output suggests a security-relevant finding worth logging.
 
-A finding should be detected ONLY when the output provides meaningful evidence of a security issue, attack surface, or notable target condition that would be worth including in a pentest report.
-
-Good examples of valid findings:
-- reachable web application or service
-- exposed port or listening service
-- suspicious privilege escalation path
-- credentials, tokens, keys, or secrets
-- sensitive files or data exposure
-- insecure misconfiguration
-- vulnerable or outdated service/version with clear security relevance
-- interesting target information that directly supports further exploitation or enumeration
-
-Do NOT create findings for:
-- normal Linux OS information
-- standard shell output
-- expected root processes inside containers
-- normal package/version output without security impact
-- generic environment details
-- basic navigation output such as pwd, ls, whoami, cat /etc/os-release
-- ordinary process listings unless they clearly reveal a security issue
-- harmless container behavior
-
-Important:
-- Seeing "root" inside a container is NOT by itself a finding.
-- Seeing multiple bash processes in a container is NOT by itself a finding.
-- OS identification alone is usually useful context, but NOT a finding unless it clearly indicates a security-relevant issue.
+STRICT RULES:
 - Prefer false negatives over false positives.
-- Only mark "finding_detected": true when there is strong evidence.
+- Do NOT create findings for normal Linux/system behavior.
+- Seeing "root" in a container is NOT a finding.
+- Only return a finding when there is strong, actionable evidence.
 
 Return ONLY valid JSON in this exact format:
 
@@ -89,21 +66,15 @@ Return ONLY valid JSON in this exact format:
   }}
 }}
 
-If no meaningful finding is present, return:
+If no finding:
 - "finding_detected": false
 - "finding_confidence": "low"
 - "finding": null
 
-Set confidence rules:
-- high = direct, strong evidence of a real security issue
-- medium = likely meaningful security lead, but not confirmed
-- low = weak, ambiguous, or contextual information only
-
 Rules:
-- Do not include markdown
-- Do not include code fences
-- Do not include any text before or after the JSON
-- Return one JSON object only
+- No markdown
+- No extra text
+- Only JSON
 """.strip()
 
 
@@ -152,12 +123,8 @@ def _normalize_response(data: dict) -> dict:
     )
     normalized["next_step"] = data.get("next_step", normalized["next_step"])
     normalized["warning"] = data.get("warning", normalized["warning"])
-    normalized["finding_detected"] = bool(
-        data.get("finding_detected", normalized["finding_detected"])
-    )
-    normalized["finding_confidence"] = data.get(
-        "finding_confidence", normalized["finding_confidence"]
-    )
+    normalized["finding_detected"] = bool(data.get("finding_detected", False))
+    normalized["finding_confidence"] = data.get("finding_confidence", "low")
 
     finding = data.get("finding")
     if isinstance(finding, dict):
@@ -180,23 +147,24 @@ def _normalize_response(data: dict) -> dict:
 def analyze_terminal_interaction(command: str, output: str) -> dict:
     prompt = build_terminal_prompt(command, output)
 
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0},
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-
-    raw = response.json().get("response", "{}")
-    cleaned = _extract_json(raw)
-
     try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": MODEL_NAME,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0},
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+
+        raw = response.json().get("response", "{}")
+        cleaned = _extract_json(raw)
+
         parsed = json.loads(cleaned)
         return _normalize_response(parsed)
-    except json.JSONDecodeError:
-        return _default_response(raw)
+
+    except Exception as exc:
+        return _default_response(str(exc))

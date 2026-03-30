@@ -1,27 +1,27 @@
-import subprocess
-from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-COMPOSE_PATH = BASE_DIR / "labs" / "juice-shop" / "docker-compose.yml"
+from app.labs.labs_config import LABS
 
 
-def start_lab():
-    try:
-        subprocess.run(
-            ["docker-compose", "-f", str(COMPOSE_PATH), "up", "-d"],
-            check=True,
-        )
-        return {"status": "Lab started"}
-    except subprocess.CalledProcessError as e:
-        return {"error": str(e)}
+def get_all_labs() -> list[dict]:
+    return [
+        {
+            "lab_id": lab_id,
+            "name": lab["name"],
+            "description": lab.get("description", ""),
+        }
+        for lab_id, lab in LABS.items()
+    ]
 
 
-def stop_lab():
-    try:
-        subprocess.run(
-            ["docker-compose", "-f", str(COMPOSE_PATH), "down"],
-            check=True,
-        )
-        return {"status": "Lab stopped"}
-    except subprocess.CalledProcessError as e:
-        return {"error": str(e)}
+def get_lab(lab_id: str) -> dict:
+    lab = LABS.get(lab_id)
+
+    if not lab:
+        raise ValueError("Lab not found")
+
+    return {
+        "lab_id": lab_id,
+        "name": lab["name"],
+        "description": lab.get("description", ""),
+        "steps": lab.get("steps", []),
+        "target_info": lab.get("target", {}),
+    }
