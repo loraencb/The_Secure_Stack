@@ -1,189 +1,284 @@
-# The_Secure_Stack
-This project is a web-based cybersecurity training platform designed to provide hands-on, safe, and guided practice in a controlled environment. Users can launch isolated vulnerable labs using Docker, create practice sessions, and capture outputs from common security tools such as Nmap and Nikto. The platform uses an AI-powered coach to explain tool results, assess potential risks, suggest next steps, and provide remediation guidance, all while operating within strict safety boundaries. Sessions and findings are stored for review and can be exported as a final report, making the platform suitable for both learning and demonstration purposes in an academic setting.
-```mermaid
-flowchart TB
+# Secure Stack
 
-  %% Users and Frontend
-  U[User]
-  FE[Frontend Web App]
+A web-based cybersecurity training platform designed for classroom use, combining hands-on penetration testing labs with structured instruction and real-time AI-assisted guidance.
 
-  %% Backend
-  BE[Backend API]
+---
 
-  %% Data
-  DB[(Database)]
-  FS[(File Storage)]
+## Overview
 
-  %% Orchestration
-  ORCH[Lab Orchestrator]
-  DE[(Docker Engine)]
-  NET[Sandbox Network]
+Secure Stack is an instructional cyber training environment that integrates:
 
-  %% AI
-  AI[AI Coach]
-  AIP[AI Provider]
+- Containerized vulnerable lab environments
+- Structured lab manuals and guided exercises
+- Real-time terminal-aware AI coaching
+- Session tracking and assessment tools
 
-  %% Reports
-  REP[Report Generator]
+The system is designed to support cybersecurity education by allowing students to learn through direct interaction with realistic environments while receiving continuous feedback on their actions.
 
-  %% Labs
-  subgraph LABS[Practice Labs]
-    L1[DVWA]
-    L2[JuiceShop]
-    L3[WebGoat]
-  end
+---
 
-  %% Connections
-  U --> FE
-  FE --> BE
+## Core Concept
 
-  BE --> DB
-  BE --> FS
+Each lab in Secure Stack is a complete instructional module composed of:
 
-  BE --> ORCH
-  ORCH --> DE
-  ORCH --> NET
-  DE --> LABS
+1. Lab Environment  
+   A containerized vulnerable system deployed per session.
 
-  BE --> AI
-  AI --> AIP
+2. Lab Manual  
+   A structured guide including objectives, tasks, and reflection questions.
 
-  BE --> REP
-  REP --> FS
-```
-### Explanation
-The user interacts with a React frontend, which talks to a FastAPI backend.
-The backend manages authentication, sessions, and logs, controls Docker-based labs through an orchestrator, stores data in the database, and sends tool output to the AI coach.
-The AI returns explanations and guidance, and everything is compiled into a final report.
+3. Real-Time Coaching Engine  
+   An AI-driven system that observes terminal activity and provides contextual feedback.
 
-## Recommended File Structure
+4. Assessment Layer  
+   Tracks progress, task completion, and student submissions.
+
+This combination transforms the platform from a simple lab launcher into a classroom-ready training system.
+
+---
+
+## Key Features
+
+### Interactive Lab Environments
+- Launch and manage isolated lab environments using Docker
+- Per-session container orchestration
+- Reset and stop functionality
+- Initial labs include:
+  - OWASP Juice Shop
+  - DVWA
+
+---
+
+### Structured Lab Manuals
+Each lab includes:
+- Learning objectives
+- Prerequisites
+- Step-by-step tasks
+- Reflection questions
+- Submission requirements
+- Ethical use guidelines
+
+Manuals are stored in Markdown and version-controlled.
+
+---
+
+### Real-Time AI Coaching
+
+The platform includes a terminal-aware AI system that:
+
+- Monitors commands and output in real time
+- Identifies the current phase of the exercise
+- Detects incorrect or inefficient actions
+- Provides:
+  - Explanations of tool output
+  - Guidance on next steps
+  - Warnings when off-track
+  - Reinforcement of correct methodology
+
+The AI operates as an active observer, not a passive chatbot.
+
+---
+
+### Session Tracking
+
+- Tracks commands executed during a session
+- Stores tool outputs and notes
+- Maintains session state and progress
+- Enables replay and review of activity
+
+---
+
+### Assessment and Submissions
+
+- Task-based lab structure
+- Student submissions per task
+- Evidence collection
+- Progress tracking
+- Instructor review capability
+
+---
+
+## System Architecture
+
+### Frontend
+- React or Next.js
+- Displays lab manuals, terminal interface, and AI feedback
+- Real-time updates via WebSockets
+
+### Backend
+- FastAPI
+- Handles:
+  - Authentication
+  - Session lifecycle
+  - Lab orchestration
+  - Command logging
+  - AI integration
+
+### Database
+- PostgreSQL
+- Stores:
+  - Users
+  - Labs
+  - Sessions
+  - Commands
+  - Submissions
+  - AI observations
+
+### Lab Infrastructure
+- Docker / Docker Compose
+- Isolated environments per session
+- Dynamic container lifecycle management
+
+### AI Layer
+- LLM-based coaching engine
+- Context-aware feedback using:
+  - Recent commands
+  - Tool outputs
+  - Lab objectives
+  - Session state
+
+---
+
+## Project Structure
 ```text
-capstone-platform/
+secure-stack/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── models/
+│   │   ├── services/
+│   │   └── main.py
+│   ├── tests/
+│   └── requirements.txt
 │
-├── README.md
-├── .env.example
-├── docker-compose.yml        # Run full system locally
+├── frontend/
+│   ├── src/
+│   └── package.json
 │
-├── frontend/                 # React web app
-│   ├── package.json
-│   └── src/
-│       ├── api/              # API calls to backend
-│       │   └── client.js
-│       ├── pages/
-│       │   ├── Login.jsx
-│       │   ├── Dashboard.jsx
-│       │   ├── Session.jsx
-│       │   └── Report.jsx
-│       ├── components/
-│       │   ├── LabControls.jsx
-│       │   ├── LogViewer.jsx
-│       │   ├── AIFeedback.jsx
-│       │   └── Navbar.jsx
-│       ├── auth/
-│       │   └── authContext.jsx
-│       ├── App.jsx
-│       └── main.jsx
-│
-├── backend/                  # FastAPI backend
-│   ├── requirements.txt
-│   └── app/
-│       ├── main.py           # FastAPI entry point
-│       │
-│       ├── auth.py           # JWT + roles
-│       ├── database.py       # DB connection
-│       ├── models.py         # SQLAlchemy models
-│       ├── schemas.py        # Pydantic schemas
-│       │
-│       ├── labs.py           # Start/stop/reset labs
-│       ├── sessions.py       # Session creation + state
-│       ├── logs.py           # Tool output ingestion
-│       ├── ai.py             # AI coach logic
-│       ├── reports.py        # HTML/PDF report export
-│       │
-│       └── utils.py          # Helpers
-│
-├── labs/                     # Docker practice labs
-│   ├── dvwa/
-│   │   ├── docker-compose.yml
-│   │   └── README.md
+├── labs/
 │   ├── juice-shop/
 │   │   ├── docker-compose.yml
-│   │   └── README.md
-│   └── lab_registry.json     # List of supported labs
+│   │   ├── metadata.json
+│   │   ├── student_manual.md
+│   │   └── instructor_guide.md
+│   └── dvwa/
 │
-├── reports/                  # Generated reports (gitignored)
-│
-└── tests/                    # Minimal backend tests
-    ├── test_auth.py
-    ├── test_sessions.py
-    └── test_labs.py
+├── docs/
+└── README.md
 ```
-### Explanation
-We separated the project into three main parts:
-a React frontend, a FastAPI backend, and Docker-based practice labs.
-The backend manages authentication, sessions, lab orchestration, AI analysis, and reporting, while the frontend provides a clean UI for controlling labs and viewing results.
-
-## Team Ownership
-- Frontend engineer
-- Backend + AI
-- DevOps
-- QA & Testing
-
-# Current Implementation Status
-
-## Completed
-
-- Docker lab orchestration implemented for OWASP Juice Shop
-- WSL2 + Docker Desktop environment configured
-- FastAPI backend skeleton created
-- Lab control module (labs.py) implemented
-- /labs/start API endpoint
-- /labs/stop API endpoint
-- Swagger API documentation available
-- End-to-end testing verified (API → Docker → Lab)
-
 ---
-# Local Development Setup
-## Database (Local SQLite)
 
-For development, the backend uses ***SQLite*** by default.
+## Lab Module Design
 
-Default database URL:
+Each lab is self-contained and includes:
 
-sqlite:///./securestack.db
+- Docker environment configuration
+- Metadata definition
+- Student manual (Markdown)
+- Instructor guide
+- Task and checkpoint definitions
 
-Tables are created automatically on backend startup.
+Example:
 
-The backend performs a *connection test* during startup to ensure the database is working correctly.
+labs/juice-shop/
+├── docker-compose.yml
+├── metadata.json
+├── student_manual.md
+├── instructor_guide.md
+└── rubric.json
 
 ---
 
-# Running the Project Locally
+## Session Workflow
 
-## Start Backend
-
-cd backend  
-python -m venv venv  
-venv\Scripts\activate  
-pip install fastapi uvicorn  
-python -m uvicorn app.main:app --reload  
-
-Backend runs at:  
-http://127.0.0.1:8000  
-
-Swagger documentation:  
-http://127.0.0.1:8000/docs  
+1. User logs in
+2. User selects a lab
+3. Backend creates a session
+4. Lab environment is launched via Docker
+5. User interacts with the target
+6. Terminal activity is captured
+7. AI coaching engine provides real-time feedback
+8. User completes tasks and submits responses
+9. Session is closed and summarized
 
 ---
 
-## Launch Vulnerable Lab
+## AI Coaching Workflow
 
-Start manually:  
-docker compose -f labs/juice-shop/docker-compose.yml up -d  
+1. Terminal events are captured (commands, output)
+2. Events are processed and classified
+3. Session state is updated
+4. Relevant context is built
+5. AI generates feedback when appropriate
+6. Feedback is displayed in real time
 
-Or via API endpoints:  
-POST /labs/start  
-POST /labs/stop  
+---
 
-Juice Shop runs at:  
-http://localhost:3001  
+## Security Considerations
+
+- All labs run in isolated Docker networks
+- No direct user access to host system
+- Backend mediates all container operations
+- Session-based resource control
+- Controlled lab images only
+
+---
+
+## MVP Scope
+
+The initial version includes:
+
+- User authentication
+- Lab selection interface
+- One fully functional lab (Juice Shop)
+- Lab manual integration
+- Session-based container launch
+- Command and activity logging
+- Real-time AI coaching (basic)
+- Session summary generation
+
+---
+
+## Future Enhancements
+
+- Additional lab modules
+- Advanced checkpoint detection
+- Instructor dashboard
+- Automated grading
+- Vector database for retrieval-based coaching
+- Multi-user classroom management
+- VM-based environments
+- Terminal emulation (xterm.js)
+
+---
+
+## Educational Use Case
+
+Secure Stack is designed to support:
+
+- Undergraduate cybersecurity courses
+- Hands-on lab sessions
+- Guided penetration testing exercises
+- Independent student practice
+- Instructor-led demonstrations
+
+The platform enables scalable instruction by augmenting human teaching with real-time AI feedback.
+
+---
+
+## License
+
+This project is intended for educational and research purposes.
+
+All lab environments must be used in controlled settings and in accordance with ethical cybersecurity practices.
+
+---
+
+## Status
+
+In active development.
+
+Initial focus:
+- Core lab orchestration
+- Lab manual integration
+- Real-time AI coaching engine
