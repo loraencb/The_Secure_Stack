@@ -1,31 +1,37 @@
 LABS = {
-    "juice-shop": {
-        "name": "OWASP Juice Shop Lab",
-        "description": "Practice web application reconnaissance and basic vulnerability discovery.",
+    "juice-shop-recon": {
+        "name": "Juice Shop Recon Lab",
+        "description": "Basic reconnaissance against an exposed web application.",
         "attacker": {
-            "image": "ubuntu:22.04",
+            "image": "securestack-attacker:latest",
             "container_name": "attacker-{session_id}",
         },
         "target": {
             "image": "bkimminich/juice-shop",
             "container_name": "target-{session_id}",
-            "ports": {"3000/tcp": None},  # auto assign
+            "ports": {"3000/tcp": None},
+            "alias": "target",
         },
         "steps": [
             {
-                "title": "Verify network access",
-                "instruction": "Check connectivity to the target container.",
-                "command_hint": "ping target",
+                "title": "Verify connectivity",
+                "instruction": "Confirm the attacker can reach the target container.",
+                "command_hint": "ping -c 3 target",
             },
             {
-                "title": "Discover open ports",
-                "instruction": "Identify open ports on the target.",
-                "command_hint": "nmap target",
+                "title": "Identify open services",
+                "instruction": "Scan the target to discover open ports and services.",
+                "command_hint": "nmap -sV target",
             },
             {
-                "title": "Access web application",
-                "instruction": "Open the Juice Shop from the attacker container.",
-                "command_hint": "curl http://target:3000"
+                "title": "Inspect the web application",
+                "instruction": "Fetch the application response from the target.",
+                "command_hint": "curl http://target:3000",
+            },
+            {
+                "title": "Open the application",
+                "instruction": "Open the target in your browser.",
+                "command_hint": "http://localhost:3000",
             },
         ],
     }

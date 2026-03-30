@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { startSession, addFinding, getReport } from "./api/client";
 import LiveTerminal from "./components/LiveTerminal";
 
@@ -9,7 +9,7 @@ export default function App() {
   const [terminalFeedback, setTerminalFeedback] = useState(null);
   const [findingSuggestion, setFindingSuggestion] = useState(null);
   const [findings, setFindings] = useState([]);
-
+  const [labInfo, setLabInfo] = useState(null);
   const [startingSession, setStartingSession] = useState(false);
   const [savingFinding, setSavingFinding] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
@@ -21,43 +21,7 @@ export default function App() {
     severity: "Medium",
     description: "",
   });
-  const handleLaunchLab = async () => {
-    if (!sessionId) {
-      setMessage("Start a session first.");
-      return;
-    }
 
-    setLaunchingLab(true);
-    setMessage("");
-
-    try {
-      const res = await fetch(
-        `http://127.0.0.1:8000/labs/launch/${sessionId}/juice-shop`,
-        { method: "POST" }
-      );
-
-      const data = await res.json();
-
-      setLabSteps(data.steps);
-      setMessage("Lab launched successfully.");
-    } catch (error) {
-      console.error("Lab launch error:", error);
-      setMessage("Failed to launch lab.");
-    } finally {
-      setLaunchingLab(false);
-    }
-  };
-  const handleAutoSavedFinding = (savedFinding) => {
-    setFindings((prev) => {
-      const exists = prev.some((f) => f.id === savedFinding.id);
-      if (exists) return prev;
-      return [...prev, savedFinding];
-    });
-
-    setFindingSuggestion(null);
-    setMessage(`AI auto-saved finding: ${savedFinding.title}`);
-  };
-  
   const handleStartSession = async () => {
     setStartingSession(true);
     setMessage("");
@@ -69,6 +33,8 @@ export default function App() {
       setTerminalFeedback(null);
       setFindingSuggestion(null);
       setFindings([]);
+      setLabInfo(null);
+      setLabSteps(null);
       setMessage(`Session ${res.id} started successfully.`);
     } catch (error) {
       console.error("Start session error:", error);
@@ -77,6 +43,57 @@ export default function App() {
       setStartingSession(false);
     }
   };
+
+  const handleLaunchLab = async () => {
+    if (!sessionId) {
+      setMessage("Start a session first.");
+      return;
+    }
+
+    setLaunchingLab(true);
+    setMessage("");
+
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:8000/labs/launch/${sessionId}/juice-shop-recon`,
+        { method: "POST" }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to launch lab.");
+      }
+
+      setLabSteps(data.steps);
+      setLabInfo(data);
+      setMessage("Lab launched successfully.");
+    } catch (error) {
+      console.error("Lab launch error:", error);
+      setMessage(error.message || "Failed to launch lab.");
+    } finally {
+      setLaunchingLab(false);
+    }
+  };
+
+  const handleAutoSavedFinding = useCallback((savedFinding) => {
+    setFindings((prev) => {
+      const exists = prev.some((f) => f.id === savedFinding.id);
+      if (exists) return prev;
+      return [...prev, savedFinding];
+    });
+
+    setFindingSuggestion(null);
+    setMessage(`AI auto-saved finding: ${savedFinding.title}`);
+  }, []);
+
+  const handleTerminalFeedback = useCallback((feedback) => {
+    setTerminalFeedback(feedback);
+  }, []);
+
+  const handleFindingSuggestion = useCallback((suggestion) => {
+    setFindingSuggestion(suggestion);
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -333,16 +350,17 @@ export default function App() {
               <span style={styles.mutedText}>Linux container shell</span>
             </div>
 
-            {sessionId ? (
+            {labInfo ? (
               <LiveTerminal
+                key={`${sessionId}-${labInfo.attacker_container}`}
                 sessionId={sessionId}
-                onFeedback={setTerminalFeedback}
-                onFindingSuggestion={setFindingSuggestion}
+                onFeedback={handleTerminalFeedback}
+                onFindingSuggestion={handleFindingSuggestion}
                 onFindingAutoSaved={handleAutoSavedFinding}
               />
             ) : (
               <div style={styles.emptyState}>
-                Start a session to open the terminal.
+                Launch a lab to open the terminal.
               </div>
             )}
           </section>
@@ -436,6 +454,11 @@ export default function App() {
                 <span style={styles.mutedText}>Step-by-step instructions</span>
               </div>
 
+              {labInfo?.browser_url && (
+                <p style={styles.paragraph}>
+                  <strong>Browser URL:</strong> {labInfo.browser_url}
+                </p>
+              )}
               <div style={styles.feedbackStack}>
                 {labSteps.map((step, i) => (
                   <div key={i}>

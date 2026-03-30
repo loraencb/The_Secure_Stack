@@ -19,7 +19,6 @@ def _reader_thread(pipe, output_queue, prefix=""):
     except Exception as exc:
         output_queue.put(f"\r\n[reader error] {exc}\r\n")
 
-
 def _container_is_running(container_name: str) -> bool:
     result = subprocess.run(
         ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
@@ -28,12 +27,13 @@ def _container_is_running(container_name: str) -> bool:
     )
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
-
 def create_terminal_session(session_id: int):
-    container_name = "securestack-attacker"
+    container_name = f"attacker-{session_id}"
 
     if not _container_is_running(container_name):
-        raise RuntimeError(f"Container '{container_name}' is not running")
+        raise RuntimeError(
+            f"Attacker container '{container_name}' is not running. Launch the lab first."
+        )
 
     process = subprocess.Popen(
         [
@@ -41,8 +41,6 @@ def create_terminal_session(session_id: int):
             "exec",
             "-i",
             container_name,
-            "env",
-            "TERM=xterm-256color",
             "bash",
             "-i",
         ],

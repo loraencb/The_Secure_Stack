@@ -10,6 +10,25 @@ export default function LiveTerminal({
   onFindingAutoSaved,
 }) {
   const terminalRef = useRef(null);
+  const termInstanceRef = useRef(null);
+  const socketRef = useRef(null);
+  const fitAddonRef = useRef(null);
+
+  const onFeedbackRef = useRef(onFeedback);
+  const onFindingSuggestionRef = useRef(onFindingSuggestion);
+  const onFindingAutoSavedRef = useRef(onFindingAutoSaved);
+
+  useEffect(() => {
+    onFeedbackRef.current = onFeedback;
+  }, [onFeedback]);
+
+  useEffect(() => {
+    onFindingSuggestionRef.current = onFindingSuggestion;
+  }, [onFindingSuggestion]);
+
+  useEffect(() => {
+    onFindingAutoSavedRef.current = onFindingAutoSaved;
+  }, [onFindingAutoSaved]);
 
   useEffect(() => {
     if (!sessionId || !terminalRef.current) return;
@@ -30,7 +49,11 @@ export default function LiveTerminal({
     term.open(terminalRef.current);
     fitAddon.fit();
 
+    termInstanceRef.current = term;
+    fitAddonRef.current = fitAddon;
+
     const socket = new WebSocket(`ws://127.0.0.1:8000/ws/terminal/${sessionId}`);
+    socketRef.current = socket;
 
     let currentLine = "";
 
@@ -45,12 +68,18 @@ export default function LiveTerminal({
 
         if (message.type === "terminal_output") {
           term.write(message.data);
-        } else if (message.type === "ai_feedback" && onFeedback) {
-          onFeedback(message.data);
-        } else if (message.type === "finding_suggestion" && onFindingSuggestion) {
-          onFindingSuggestion(message.data);
-        } else if (message.type === "finding_auto_saved" && onFindingAutoSaved) {
-          onFindingAutoSaved(message.data);
+        } else if (message.type === "ai_feedback" && onFeedbackRef.current) {
+          onFeedbackRef.current(message.data);
+        } else if (
+          message.type === "finding_suggestion" &&
+          onFindingSuggestionRef.current
+        ) {
+          onFindingSuggestionRef.current(message.data);
+        } else if (
+          message.type === "finding_auto_saved" &&
+          onFindingAutoSavedRef.current
+        ) {
+          onFindingAutoSavedRef.current(message.data);
         }
       } catch {
         term.write(event.data);
@@ -69,7 +98,7 @@ export default function LiveTerminal({
       const code = data.charCodeAt(0);
 
       if (code === 13) {
-        if (onFeedback) onFeedback(null);
+        if (onFeedbackRef.current) onFeedbackRef.current(null);
         socket.send(currentLine);
         term.write("\r\n");
         currentLine = "";
@@ -89,10 +118,18 @@ export default function LiveTerminal({
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      socket.close();
-      term.dispose();
+
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+
+      if (termInstanceRef.current) {
+        termInstanceRef.current.dispose();
+        termInstanceRef.current = null;
+      }
     };
-  }, [sessionId, onFeedback, onFindingSuggestion, onFindingAutoSaved]);
+  }, [sessionId]);
 
   return (
     <div
