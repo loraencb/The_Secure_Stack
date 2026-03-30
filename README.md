@@ -1,189 +1,265 @@
-# The_Secure_Stack
-This project is a web-based cybersecurity training platform designed to provide hands-on, safe, and guided practice in a controlled environment. Users can launch isolated vulnerable labs using Docker, create practice sessions, and capture outputs from common security tools such as Nmap and Nikto. The platform uses an AI-powered coach to explain tool results, assess potential risks, suggest next steps, and provide remediation guidance, all while operating within strict safety boundaries. Sessions and findings are stored for review and can be exported as a final report, making the platform suitable for both learning and demonstration purposes in an academic setting.
-```mermaid
-flowchart TB
+# The Secure Stack
 
-  %% Users and Frontend
-  U[User]
-  FE[Frontend Web App]
+![Python](https://img.shields.io/badge/backend-FastAPI-green)
+![React](https://img.shields.io/badge/frontend-React-blue)
+![Docker](https://img.shields.io/badge/environment-Docker-blue)
+![AI](https://img.shields.io/badge/AI-Ollama%20LLM-purple)
+![Status](https://img.shields.io/badge/status-Demo%20Ready-success)
 
-  %% Backend
-  BE[Backend API]
+> An **AI-assisted cybersecurity training platform** that provides real-time guidance, automated findings detection, and structured penetration testing labs.
 
-  %% Data
-  DB[(Database)]
-  FS[(File Storage)]
+---
 
-  %% Orchestration
-  ORCH[Lab Orchestrator]
-  DE[(Docker Engine)]
-  NET[Sandbox Network]
+## Overview
 
-  %% AI
-  AI[AI Coach]
-  AIP[AI Provider]
+**The Secure Stack** is an interactive cybersecurity training environment that combines:
 
-  %% Reports
-  REP[Report Generator]
+- Hands-on penetration testing labs
+- Real Linux terminal access (Docker-based)
+- AI-powered analysis and guidance
+- Automated reporting and findings tracking
+- Guided lab progression (step-by-step learning)
 
-  %% Labs
-  subgraph LABS[Practice Labs]
-    L1[DVWA]
-    L2[JuiceShop]
-    L3[WebGoat]
-  end
+The platform simulates real-world pentesting workflows while helping users learn as they go.
 
-  %% Connections
-  U --> FE
-  FE --> BE
+---
 
-  BE --> DB
-  BE --> FS
+## Key Features
 
-  BE --> ORCH
-  ORCH --> DE
-  ORCH --> NET
-  DE --> LABS
+### Lab Environment
+- Launch isolated lab environments per session
+- Includes:
+  - Attacker machine (Linux container)
+  - Target machine (vulnerable application)
+  - Private network between containers
+- Example lab: **OWASP Juice Shop Recon Lab**
 
-  BE --> AI
-  AI --> AIP
+---
 
-  BE --> REP
-  REP --> FS
-```
-### Explanation
-The user interacts with a React frontend, which talks to a FastAPI backend.
-The backend manages authentication, sessions, and logs, controls Docker-based labs through an orchestrator, stores data in the database, and sends tool output to the AI coach.
-The AI returns explanations and guidance, and everything is compiled into a final report.
+### Live Terminal
+- Fully interactive Linux shell inside attacker container
+- Executes real commands (`nmap`, `curl`, etc.)
+- WebSocket-powered real-time streaming
 
-## Recommended File Structure
+---
+
+### AI Assistant (Ollama)
+- Analyzes every command + output
+- Classifies actions into:
+  - reconnaissance
+  - enumeration
+  - exploitation
+  - post-exploitation
+- Provides:
+  - explanations
+  - security relevance
+  - next steps
+
+---
+
+### Automatic Findings Detection
+- AI detects security-relevant results from terminal output
+- Automatically suggests findings:
+  - open ports
+  - exposed services
+  - vulnerable endpoints
+- One-click accept → saved to report
+
+---
+
+### Guided Lab Progression
+- Step-by-step lab instructions
+- Tracks user progress automatically
+- Unlocks next step when correct command is executed
+- Visual status:
+  - Completed
+  - Current
+  - Pending
+
+---
+
+### Reporting System
+- Automatically builds a report during the session
+- Includes:
+  - findings
+  - severity levels
+  - AI-generated summary
+  - recommendations
+
+---
+
+## Architecture
 ```text
-capstone-platform/
-│
-├── README.md
-├── .env.example
-├── docker-compose.yml        # Run full system locally
-│
-├── frontend/                 # React web app
-│   ├── package.json
-│   └── src/
-│       ├── api/              # API calls to backend
-│       │   └── client.js
-│       ├── pages/
-│       │   ├── Login.jsx
-│       │   ├── Dashboard.jsx
-│       │   ├── Session.jsx
-│       │   └── Report.jsx
-│       ├── components/
-│       │   ├── LabControls.jsx
-│       │   ├── LogViewer.jsx
-│       │   ├── AIFeedback.jsx
-│       │   └── Navbar.jsx
-│       ├── auth/
-│       │   └── authContext.jsx
-│       ├── App.jsx
-│       └── main.jsx
-│
-├── backend/                  # FastAPI backend
-│   ├── requirements.txt
-│   └── app/
-│       ├── main.py           # FastAPI entry point
-│       │
-│       ├── auth.py           # JWT + roles
-│       ├── database.py       # DB connection
-│       ├── models.py         # SQLAlchemy models
-│       ├── schemas.py        # Pydantic schemas
-│       │
-│       ├── labs.py           # Start/stop/reset labs
-│       ├── sessions.py       # Session creation + state
-│       ├── logs.py           # Tool output ingestion
-│       ├── ai.py             # AI coach logic
-│       ├── reports.py        # HTML/PDF report export
-│       │
-│       └── utils.py          # Helpers
-│
-├── labs/                     # Docker practice labs
-│   ├── dvwa/
-│   │   ├── docker-compose.yml
-│   │   └── README.md
-│   ├── juice-shop/
-│   │   ├── docker-compose.yml
-│   │   └── README.md
-│   └── lab_registry.json     # List of supported labs
-│
-├── reports/                  # Generated reports (gitignored)
-│
-└── tests/                    # Minimal backend tests
-    ├── test_auth.py
-    ├── test_sessions.py
-    └── test_labs.py
+Frontend (React)
+↓
+WebSocket + REST API
+↓
+Backend (FastAPI)
+├── Terminal Manager (Docker exec)
+├── Lab Service (Docker containers + networks)
+├── AI Service (Ollama)
+├── Findings + Reports API
+↓
+Docker Engine
+├── Attacker Container
+├── Target Container
+└── Lab Network
 ```
-### Explanation
-We separated the project into three main parts:
-a React frontend, a FastAPI backend, and Docker-based practice labs.
-The backend manages authentication, sessions, lab orchestration, AI analysis, and reporting, while the frontend provides a clean UI for controlling labs and viewing results.
-
-## Team Ownership
-- Frontend engineer
-- Backend + AI
-- DevOps
-- QA & Testing
-
-# Current Implementation Status
-
-## Completed
-
-- Docker lab orchestration implemented for OWASP Juice Shop
-- WSL2 + Docker Desktop environment configured
-- FastAPI backend skeleton created
-- Lab control module (labs.py) implemented
-- /labs/start API endpoint
-- /labs/stop API endpoint
-- Swagger API documentation available
-- End-to-end testing verified (API → Docker → Lab)
-
 ---
-# Local Development Setup
-## Database (Local SQLite)
 
-For development, the backend uses ***SQLite*** by default.
+## Tech Stack
 
-Default database URL:
+### Backend
+- FastAPI
+- Python
+- Docker SDK
+- WebSockets (real-time terminal)
+- Ollama (LLM inference)
 
-sqlite:///./securestack.db
+### Frontend
+- React
+- xterm.js (terminal UI)
+- Fetch API
 
-Tables are created automatically on backend startup.
-
-The backend performs a *connection test* during startup to ensure the database is working correctly.
+### Infrastructure
+- Docker (containerized labs)
+- Localhost networking
 
 ---
 
-# Running the Project Locally
+## Installation & Setup
 
-## Start Backend
+### 1. Clone the repository
 
-cd backend  
-python -m venv venv  
-venv\Scripts\activate  
-pip install fastapi uvicorn  
-python -m uvicorn app.main:app --reload  
-
-Backend runs at:  
-http://127.0.0.1:8000  
-
-Swagger documentation:  
-http://127.0.0.1:8000/docs  
+git clone https://github.com/loraencb/The_Secure_Stack.git
+cd The_Secure_Stack
 
 ---
 
-## Launch Vulnerable Lab
+### 2. Start Docker
 
-Start manually:  
-docker compose -f labs/juice-shop/docker-compose.yml up -d  
+Ensure Docker Desktop is running:
 
-Or via API endpoints:  
-POST /labs/start  
-POST /labs/stop  
+docker ps
 
-Juice Shop runs at:  
-http://localhost:3001  
+---
+
+### 3. Run Ollama (AI)
+
+ollama run llama3
+
+---
+
+### 4. Backend Setup
+
+cd backend
+
+pip install -r requirements.txt
+
+uvicorn app.main:app --reload
+
+Backend runs at:
+http://127.0.0.1:8000
+
+---
+
+### 5. Frontend Setup
+
+cd frontend
+
+npm install
+npm run dev
+
+Frontend runs at:
+http://localhost:5173
+
+---
+
+## How to Use
+
+### 1. Start a Session
+Click **Start Session**
+
+---
+
+### 2. Launch Lab
+Click **Launch Juice Shop Lab**
+
+---
+
+### 3. Follow Guided Steps
+
+ping -c 3 target
+nmap -sV target
+curl http://target:3000
+
+---
+
+### 4. Observe AI Feedback
+- Real-time explanations
+- Suggested next actions
+
+---
+
+### 5. Capture Findings
+- Auto-detected OR manual
+- Stored instantly
+
+---
+
+### 6. Generate Report
+Click **Generate Report**
+
+---
+
+## Example Lab: Juice Shop Recon
+
+- Target: OWASP Juice Shop
+- Vulnerabilities:
+  - exposed web app
+  - discoverable via scanning
+- Learning objectives:
+  - network recon
+  - service enumeration
+  - web discovery
+
+---
+
+## Known Limitations
+
+- Terminal runs without full TTY (minor bash warnings)
+- Labs are local (not cloud-deployed)
+- Limited lab variety (expandable)
+- No authentication system (demo-focused)
+
+---
+
+## Future Improvements
+
+- More labs (Metasploitable, DVWA, etc.)
+- Smarter AI (context-aware sessions)
+- Remote lab hosting
+- Multi-user support
+- Advanced reporting dashboards
+- Terminal output highlighting
+
+---
+
+## Contributors
+
+- Braulio Lora Encarnacion
+- Team Secure Stack
+
+---
+
+## License
+
+This project is for **educational and research purposes only**.
+
+---
+
+## Final Note
+
+The Secure Stack is more than a tool — it is a **learning platform** that bridges:
+
+> Hands-on cybersecurity practice + AI-driven guidance
