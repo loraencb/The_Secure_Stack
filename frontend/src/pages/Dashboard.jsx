@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getHealth } from "../api/client";
+import { getHealth } from "../api/Client";
 
 export default function Dashboard() {
   const [status, setStatus] = useState("Checking backend...");

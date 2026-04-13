@@ -60,13 +60,16 @@ export default function LiveTerminal({
     socketRef.current = socket;
 
     let currentLine = "";
+    let isDisposed = false;
 
     socket.onopen = () => {
+      if (isDisposed) return;
       term.writeln(`[connected to session ${sessionId}]`);
-      term.write("> ");
     };
 
     socket.onmessage = (event) => {
+      if (isDisposed) return;
+
       try {
         const message = JSON.parse(event.data);
 
@@ -91,14 +94,20 @@ export default function LiveTerminal({
     };
 
     socket.onclose = () => {
+      if (isDisposed) return;
       term.writeln("\r\n[terminal disconnected]");
     };
 
     socket.onerror = () => {
+      if (isDisposed) return;
       term.writeln("\r\n[terminal socket error]");
     };
 
-    term.onData((data) => {
+    const dataDisposable = term.onData((data) => {
+      if (socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
       const code = data.charCodeAt(0);
 
       if (code === 13) {
@@ -127,7 +136,9 @@ export default function LiveTerminal({
     window.addEventListener("resize", handleResize);
 
     return () => {
+      isDisposed = true;
       window.removeEventListener("resize", handleResize);
+      dataDisposable.dispose();
 
       if (socketRef.current) {
         socketRef.current.close();

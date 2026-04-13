@@ -9,6 +9,10 @@ class TerminalSession:
         self.output_queue = output_queue
 
 
+def get_attacker_container_name(session_id: int) -> str:
+    return f"attacker-{session_id}"
+
+
 def _reader_thread(pipe, output_queue, prefix=""):
     try:
         while True:
@@ -28,7 +32,7 @@ def _container_is_running(container_name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
 def create_terminal_session(session_id: int):
-    container_name = f"attacker-{session_id}"
+    container_name = get_attacker_container_name(session_id)
 
     if not _container_is_running(container_name):
         raise RuntimeError(

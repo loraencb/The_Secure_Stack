@@ -1,14 +1,18 @@
 import docker
-<<<<<<< HEAD
 from copy import deepcopy
-=======
->>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
+import time
+
+import requests
+
 from app.labs.labs_config import LABS
 
-client = docker.from_env()
+
+def get_docker_client():
+    return docker.from_env()
 
 
 def get_or_create_network(name: str):
+    client = get_docker_client()
     try:
         return client.networks.get(name)
     except docker.errors.NotFound:
@@ -16,8 +20,10 @@ def get_or_create_network(name: str):
 
 
 def safe_remove_container(name: str):
+    client = get_docker_client()
     try:
         container = client.containers.get(name)
+        container.reload()
         if container.status == "running":
             container.stop()
         container.remove(force=True)
@@ -26,6 +32,7 @@ def safe_remove_container(name: str):
 
 
 def safe_remove_network(name: str):
+    client = get_docker_client()
     try:
         network = client.networks.get(name)
         network.remove()
@@ -35,7 +42,28 @@ def safe_remove_network(name: str):
         pass
 
 
+def wait_for_http_service(browser_url: str, timeout: float = 60.0):
+    deadline = time.monotonic() + timeout
+    last_error = None
+
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(browser_url, timeout=3)
+            if response.ok:
+                return
+            last_error = f"HTTP {response.status_code}"
+        except requests.RequestException as exc:
+            last_error = str(exc)
+
+        time.sleep(1)
+
+    raise RuntimeError(
+        f"Target service did not become ready at {browser_url} within {timeout:.0f}s. Last error: {last_error}"
+    )
+
+
 def launch_lab(session_id: int, lab_id: str):
+    client = get_docker_client()
     lab = LABS.get(lab_id)
     if not lab:
         raise ValueError("Lab not found")
@@ -74,28 +102,21 @@ def launch_lab(session_id: int, lab_id: str):
         )
 
         target.reload()
-        port_info = target.attrs["NetworkSettings"]["Ports"].get("3000/tcp", [])
-<<<<<<< HEAD
-
+        app_port = lab["target"].get("app_port", 3000)
+        port_info = target.attrs["NetworkSettings"]["Ports"].get(f"{app_port}/tcp", [])
         browser_url = None
         host_port = None
-=======
-        browser_url = None
->>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
         if port_info:
             host_port = port_info[0]["HostPort"]
             browser_url = f"http://localhost:{host_port}"
+            wait_for_http_service(browser_url)
 
-<<<<<<< HEAD
         steps = deepcopy(lab["steps"])
         if host_port:
             for step in steps:
                 hint = step.get("command_hint", "")
                 if "{target_port}" in hint:
                     step["command_hint"] = hint.replace("{target_port}", str(host_port))
-
-=======
->>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
         return {
             "lab_id": lab_id,
             "lab_name": lab["name"],
@@ -104,11 +125,7 @@ def launch_lab(session_id: int, lab_id: str):
             "network_name": network.name,
             "target_alias": lab["target"]["alias"],
             "browser_url": browser_url,
-<<<<<<< HEAD
             "steps": steps,
-=======
-            "steps": lab["steps"],
->>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
         }
 
     except Exception:

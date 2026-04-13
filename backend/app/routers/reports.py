@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app import models, schemas
@@ -23,7 +23,7 @@ def generate_report(session_id: int, db: Session = Depends(get_db)):
     ).first()
 
     if not session:
-        return {"error": "Session not found"}
+        raise HTTPException(status_code=404, detail="Session not found")
 
     findings = db.query(models.Finding).filter(
         models.Finding.session_id == session_id

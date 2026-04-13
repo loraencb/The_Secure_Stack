@@ -2,22 +2,26 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
+import time
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app import models
 from app.services.terminal_manager import (
-    create_terminal_session,
-    write_to_terminal,
-    read_from_terminal,
     cleanup_terminal_session,
+    create_terminal_session,
+    get_attacker_container_name,
+    read_from_terminal,
+    write_to_terminal,
 )
 from app.services.ai_terminal_feedback import analyze_terminal_interaction
 
 router = APIRouter(tags=["Terminal"])
 logger = logging.getLogger(__name__)
+PROMPT_PATTERN = re.compile(r"\[stderr\]\s.*#\s*$", re.MULTILINE)
 
 
 def save_auto_finding(session_id: int, finding: dict):
@@ -31,6 +35,18 @@ def save_auto_finding(session_id: int, finding: dict):
         full_description = description
         if evidence:
             full_description += f"\n\nEvidence:\n{evidence}"
+
+        existing_finding = (
+            db.query(models.Finding)
+            .filter(
+                models.Finding.session_id == session_id,
+                models.Finding.title == title,
+                models.Finding.description == full_description,
+            )
+            .first()
+        )
+        if existing_finding:
+            return existing_finding
 
         new_finding = models.Finding(
             session_id=session_id,
@@ -46,13 +62,51 @@ def save_auto_finding(session_id: int, finding: dict):
         db.close()
 
 
+async def collect_command_output(latest_output_buffer, max_wait=30.0, idle_wait=0.6):
+    start = time.monotonic()
+    last_change = start
+    previous_size = 0
+    has_output = False
+
+    while True:
+        combined_output = "".join(latest_output_buffer)
+        current_size = len(latest_output_buffer)
+        if current_size != previous_size:
+            previous_size = current_size
+            last_change = time.monotonic()
+            has_output = current_size > 0
+
+        now = time.monotonic()
+        if (
+            has_output
+            and PROMPT_PATTERN.search(combined_output)
+            and (now - last_change) >= idle_wait
+        ):
+            return combined_output.strip()
+
+        if (now - start) >= max_wait:
+            return combined_output.strip()
+
+        await asyncio.sleep(0.1)
+
+
 @router.websocket("/ws/terminal/{session_id}")
 async def terminal_ws(websocket: WebSocket, session_id: int):
     terminal = None
     sender_task = None
     latest_output_buffer = []
+    db: Session = SessionLocal()
 
     try:
+        session = (
+            db.query(models.Session).filter(models.Session.id == session_id).first()
+        )
+        if not session:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
+        expected_container = get_attacker_container_name(session_id)
+
         await websocket.accept()
         logger.info("WebSocket accepted for session %s", session_id)
 
@@ -65,6 +119,7 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                     "type": "terminal_output",
                     "data": (
                         f"[Secure Stack terminal connected for session {session_id}]\r\n"
+                        f"[Attacker container: {expected_container}]\r\n"
                         "[Linux container shell ready]\r\n"
                     ),
                 }
@@ -89,7 +144,7 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                 output = read_from_terminal(terminal)
                 if output:
                     latest_output_buffer.append(output)
-                    if len(latest_output_buffer) > 50:
+                    if len(latest_output_buffer) > 200:
                         latest_output_buffer.pop(0)
 
                     with contextlib.suppress(Exception):
@@ -154,8 +209,7 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                     )
                 break
 
-            await asyncio.sleep(1.2)
-            command_output = "".join(latest_output_buffer).strip()
+            command_output = await collect_command_output(latest_output_buffer)
 
             try:
                 feedback = analyze_terminal_interaction(command, command_output)
@@ -174,35 +228,24 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                 finding_confidence = feedback.get("finding_confidence")
                 finding = feedback.get("finding")
 
-                if finding_detected and finding:
-                    if finding_confidence == "high":
-                        saved_finding = save_auto_finding(session_id, finding)
+                if finding_detected and finding and finding_confidence == "high":
+                    saved_finding = save_auto_finding(session_id, finding)
 
-                        with contextlib.suppress(Exception):
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "finding_auto_saved",
-                                        "data": {
-                                            "id": saved_finding.id,
-                                            "session_id": saved_finding.session_id,
-                                            "title": saved_finding.title,
-                                            "severity": saved_finding.severity,
-                                            "description": saved_finding.description,
-                                        },
-                                    }
-                                )
+                    with contextlib.suppress(Exception):
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "finding_auto_saved",
+                                    "data": {
+                                        "id": saved_finding.id,
+                                        "session_id": saved_finding.session_id,
+                                        "title": saved_finding.title,
+                                        "severity": saved_finding.severity,
+                                        "description": saved_finding.description,
+                                    },
+                                }
                             )
-                    else:
-                        with contextlib.suppress(Exception):
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "finding_suggestion",
-                                        "data": finding,
-                                    }
-                                )
-                            )
+                        )
 
             except Exception as exc:
                 logger.exception(
@@ -220,7 +263,7 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                                     "phase": "general-navigation",
                                     "explanation": "AI feedback failed.",
                                     "security_relevance": "No analysis available.",
-                                    "next_step": "",
+                                    "next_step": "Continue with the guided recon steps and review the command output manually.",
                                     "warning": str(exc),
                                     "finding_detected": False,
                                     "finding_confidence": "low",
@@ -247,6 +290,8 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
             )
 
     finally:
+        db.close()
+
         if sender_task:
             sender_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):

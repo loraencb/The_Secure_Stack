@@ -57,32 +57,60 @@ def extract_json_object(text: str) -> str:
 
 
 def generate_summary(findings):
+    if not findings:
+        return {
+            "risk_level": "Low",
+            "key_issues": [],
+            "recommendations": [
+                "Continue the lab and capture at least one meaningful finding before generating a final report."
+            ],
+            "summary": "No findings have been recorded for this session yet.",
+        }
+
     prompt = build_prompt(findings)
 
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": "llama3",
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0
-            }
-        },
-        timeout=60,
-    )
-
-    response.raise_for_status()
-    data = response.json()
-    raw = data.get("response", "{}")
-
-    cleaned = extract_json_object(raw)
-
     try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": "llama3",
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0},
+            },
+            timeout=60,
+        )
+
+        response.raise_for_status()
+        data = response.json()
+        raw = data.get("response", "{}")
+
+        cleaned = extract_json_object(raw)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            return {
+                "risk_level": "Medium",
+                "key_issues": [finding.title for finding in findings[:3]],
+                "recommendations": [
+                    "Review the captured findings and validate their business impact.",
+                    "Confirm remediation steps for the exposed services and application paths identified during the lab.",
+                ],
+                "summary": "The report generator returned malformed AI output, so a fallback summary was produced from the saved findings.",
+            }
+    except requests.RequestException:
+        highest = "Low"
+        if any((finding.severity or "").lower() == "high" for finding in findings):
+            highest = "High"
+        elif any((finding.severity or "").lower() == "medium" for finding in findings):
+            highest = "Medium"
+
         return {
-            "error": "AI parsing failed",
-            "raw_output": raw,
-            "cleaned_output": cleaned,
+            "risk_level": highest,
+            "key_issues": [finding.title for finding in findings[:3]],
+            "recommendations": [
+                "Validate the saved findings and confirm remediation priorities.",
+                "Use the captured evidence to explain why the exposed services matter to the target's attack surface.",
+            ],
+            "summary": f"A fallback report was generated from {len(findings)} saved finding(s) because the AI service was unavailable.",
         }

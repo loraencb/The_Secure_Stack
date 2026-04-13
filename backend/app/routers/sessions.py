@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app import models, schemas
@@ -29,7 +29,7 @@ def end_session(session_id: int, db: Session = Depends(get_db)):
     session = db.query(models.Session).filter(models.Session.id == session_id).first()
 
     if not session:
-        return {"error": "Session not found"}
+        raise HTTPException(status_code=404, detail="Session not found")
 
     session.status = "completed"
     session.end_time = datetime.utcnow()

@@ -10,10 +10,7 @@ LABS = {
             "image": "bkimminich/juice-shop",
             "container_name": "target-{session_id}",
             "ports": {"3000/tcp": None},
-<<<<<<< HEAD
             "app_port": 3000,
-=======
->>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
             "alias": "target",
         },
         "steps": [
@@ -21,25 +18,25 @@ LABS = {
                 "title": "Verify connectivity",
                 "instruction": "Confirm the attacker can reach the target container.",
                 "command_hint": "ping -c 3 target",
+                "step_type": "command",
             },
             {
                 "title": "Identify open services",
                 "instruction": "Scan the target to discover open ports and services.",
                 "command_hint": "nmap -sV target",
+                "step_type": "command",
             },
             {
                 "title": "Inspect the web application",
                 "instruction": "Fetch the application response from the target.",
                 "command_hint": "curl http://target:3000",
+                "step_type": "command",
             },
             {
                 "title": "Open the application",
                 "instruction": "Open the target in your browser.",
-<<<<<<< HEAD
                 "command_hint": "http://localhost:{target_port}",
-=======
-                "command_hint": "http://localhost:3000",
->>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
+                "step_type": "browser",
             },
         ],
     }

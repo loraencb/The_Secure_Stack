@@ -1,6 +1,31 @@
-import { useMemo, useState, useCallback } from "react";
-import { startSession, addFinding, getReport } from "./api/client";
+import { useState, useCallback } from "react";
+import { startSession, launchLab, addFinding, getReport } from "./api/Client";
 import LiveTerminal from "./components/LiveTerminal";
+
+function mergeFindings(existingFindings, incomingFindings) {
+  const merged = [...existingFindings];
+
+  for (const finding of incomingFindings) {
+    if (!finding) continue;
+
+    const exists = merged.some((item) => {
+      if (item.id && finding.id) return item.id === finding.id;
+
+      return (
+        item.session_id === finding.session_id &&
+        item.title === finding.title &&
+        item.severity === finding.severity &&
+        item.description === finding.description
+      );
+    });
+
+    if (!exists) {
+      merged.push(finding);
+    }
+  }
+
+  return merged;
+}
 
 export default function App() {
   const [sessionId, setSessionId] = useState(null);
@@ -39,10 +64,11 @@ export default function App() {
       setFindings([]);
       setLabInfo(null);
       setLabSteps(null);
+      setReport(null);
       setMessage(`Session ${res.id} started successfully.`);
     } catch (error) {
       console.error("Start session error:", error);
-      setMessage("Failed to start session.");
+      setMessage(error.message || "Failed to start session.");
     } finally {
       setStartingSession(false);
     }
@@ -59,19 +85,11 @@ export default function App() {
     setCurrentLabStep(0);
     setCompletedSteps([]);
     try {
-      const res = await fetch(
-        `http://127.0.0.1:8000/labs/launch/${sessionId}/juice-shop-recon`,
-        { method: "POST" }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.detail || "Failed to launch lab.");
-      }
-
-      setLabSteps(data.steps);
+      const data = await launchLab(sessionId, "juice-shop-recon");
+      setLabSteps(data.steps || []);
       setLabInfo(data);
+      setTerminalFeedback(null);
+      setFindingSuggestion(null);
       setMessage("Lab launched successfully.");
     } catch (error) {
       console.error("Lab launch error:", error);
@@ -83,7 +101,28 @@ export default function App() {
   
   const normalizeCommand = (command) => command.trim().toLowerCase();
 
-  const commandMatchesStep = (command, hint) => {
+  const getCurrentStep = useCallback(() => {
+    if (!labSteps?.length) return null;
+    return labSteps[currentLabStep] || null;
+  }, [labSteps, currentLabStep]);
+
+  const completeCurrentStep = useCallback(
+    (successMessage) => {
+      const activeStep = getCurrentStep();
+      if (!activeStep) return;
+
+      setCompletedSteps((prev) => {
+        if (prev.includes(currentLabStep)) return prev;
+        return [...prev, currentLabStep];
+      });
+
+      setCurrentLabStep((prev) => Math.min(prev + 1, labSteps.length));
+      setMessage(successMessage);
+    },
+    [currentLabStep, getCurrentStep, labSteps]
+  );
+
+  const commandMatchesStep = useCallback((command, hint) => {
     const c = normalizeCommand(command);
     const h = normalizeCommand(hint);
 
@@ -93,7 +132,7 @@ export default function App() {
     if (h.startsWith("http://") || h.startsWith("https://")) return false;
 
     return c === h;
-  };
+  }, []);
 
   const handleCommandSubmitted = useCallback(
     (command) => {
@@ -102,25 +141,19 @@ export default function App() {
 
       const activeStep = labSteps[currentLabStep];
       const expectedHint = activeStep?.command_hint || "";
+      const stepType = activeStep?.step_type || "command";
+
+      if (stepType !== "command") return;
 
       if (commandMatchesStep(command, expectedHint)) {
-        setCompletedSteps((prev) => {
-          if (prev.includes(currentLabStep)) return prev;
-          return [...prev, currentLabStep];
-        });
-
-        setCurrentLabStep((prev) => prev + 1);
-        setMessage(`Step ${currentLabStep + 1} completed.`);
+        completeCurrentStep(`Step ${currentLabStep + 1} completed.`);
       }
     },
-    [labSteps, currentLabStep]
+    [labSteps, currentLabStep, completeCurrentStep, commandMatchesStep]
   );
+
   const handleAutoSavedFinding = useCallback((savedFinding) => {
-    setFindings((prev) => {
-      const exists = prev.some((f) => f.id === savedFinding.id);
-      if (exists) return prev;
-      return [...prev, savedFinding];
-    });
+    setFindings((prev) => mergeFindings(prev, [savedFinding]));
 
     setFindingSuggestion(null);
     setMessage(`AI auto-saved finding: ${savedFinding.title}`);
@@ -168,15 +201,16 @@ export default function App() {
 
       const saved = await addFinding(payload);
 
-      setFindings((prev) => [
-        ...prev,
-        saved?.id
-          ? saved
-          : {
-              id: Date.now(),
-              ...payload,
-            },
-      ]);
+      setFindings((prev) =>
+        mergeFindings(prev, [
+          saved?.id
+            ? saved
+            : {
+                id: Date.now(),
+                ...payload,
+              },
+        ])
+      );
 
       setFindingForm({
         title: "",
@@ -219,15 +253,16 @@ export default function App() {
 
       const saved = await addFinding(payload);
 
-      setFindings((prev) => [
-        ...prev,
-        saved?.id
-          ? saved
-          : {
-              id: Date.now(),
-              ...payload,
-            },
-      ]);
+      setFindings((prev) =>
+        mergeFindings(prev, [
+          saved?.id
+            ? saved
+            : {
+                id: Date.now(),
+                ...payload,
+              },
+        ])
+      );
 
       setFindingSuggestion(null);
       setMessage("Suggested finding accepted and saved.");
@@ -257,7 +292,7 @@ export default function App() {
       setReport(res);
 
       if (Array.isArray(res?.findings)) {
-        setFindings(res.findings);
+        setFindings((prev) => mergeFindings(prev, res.findings));
       }
 
       setMessage("Report generated successfully.");
@@ -273,18 +308,18 @@ export default function App() {
     setTerminalFeedback(null);
   };
 
-  const demoCommands = useMemo(
-    () => [
-      "pwd",
-      "ls",
-      "whoami",
-      "uname -a",
-      "ip a",
-      "ps aux",
-      "cat /etc/os-release",
-    ],
-    []
-  );
+  const activeLabStep = getCurrentStep();
+  const totalSteps = labSteps?.length || 0;
+  const progressPercent =
+    totalSteps > 0 ? Math.round((completedSteps.length / totalSteps) * 100) : 0;
+
+  const handleCompleteBrowserStep = () => {
+    if (!activeLabStep || activeLabStep.step_type !== "browser") {
+      return;
+    }
+
+    completeCurrentStep(`Step ${currentLabStep + 1} completed.`);
+  };
 
   const riskColor = {
     High: "#dc2626",
@@ -377,7 +412,7 @@ export default function App() {
               <div style={styles.metaItem}>
                 <span style={styles.metaLabel}>AI Feedback</span>
                 <span style={styles.metaValue}>
-                  {terminalFeedback ? "Live" : "Waiting"}
+                  {labInfo ? (terminalFeedback ? "Live" : "Ready") : "Waiting"}
                 </span>
               </div>
             </div>
@@ -485,6 +520,23 @@ export default function App() {
             >
               {launchingLab ? "Launching..." : "Launch Juice Shop Lab"}
             </button>
+
+            {labInfo ? (
+              <div style={styles.metaStack}>
+                <div style={styles.metaInlineRow}>
+                  <span style={styles.metaLabel}>Attacker</span>
+                  <span style={styles.metaValue}>{labInfo.attacker_container}</span>
+                </div>
+                <div style={styles.metaInlineRow}>
+                  <span style={styles.metaLabel}>Target</span>
+                  <span style={styles.metaValue}>{labInfo.target_container}</span>
+                </div>
+                <div style={styles.metaInlineRow}>
+                  <span style={styles.metaLabel}>Network</span>
+                  <span style={styles.metaValue}>{labInfo.network_name}</span>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           {labSteps && (
@@ -493,6 +545,16 @@ export default function App() {
                 <h2 style={styles.cardTitle}>Lab Guide</h2>
                 <span style={styles.mutedText}>Step-by-step instructions</span>
               </div>
+
+              <div style={styles.progressTrack}>
+                <div
+                  style={{
+                    ...styles.progressFill,
+                    width: `${progressPercent}%`,
+                  }}
+                />
+              </div>
+              <p style={styles.progressLabel}>{progressPercent}% complete</p>
 
               {labInfo?.browser_url && (
                 <p style={styles.paragraph}>
@@ -551,6 +613,18 @@ export default function App() {
                       <p style={styles.paragraph}>{step.instruction}</p>
 
                       <code style={styles.commandChip}>{step.command_hint}</code>
+
+                      {isActive && step.step_type === "browser" ? (
+                        <div style={styles.stepActionRow}>
+                          <button
+                            style={styles.secondaryButton}
+                            onClick={handleCompleteBrowserStep}
+                            type="button"
+                          >
+                            Mark Browser Step Complete
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -673,9 +747,14 @@ export default function App() {
                   <div key={finding.id ?? index} style={styles.findingCard}>
                     <div style={styles.findingTopRow}>
                       <strong style={styles.findingTitle}>{finding.title}</strong>
-                      <span style={severityBadgeStyle(finding.severity)}>
-                        {finding.severity}
-                      </span>
+                      <div style={styles.findingBadgeRow}>
+                        <span style={severityBadgeStyle(finding.severity)}>
+                          {finding.severity}
+                        </span>
+                        {finding.description?.includes("Evidence:\n") ? (
+                          <span style={styles.aiTag}>AI-assisted</span>
+                        ) : null}
+                      </div>
                     </div>
                     <p style={styles.findingDescription}>
                       {finding.description}
@@ -895,6 +974,18 @@ const styles = {
     fontWeight: 700,
     color: "#111827",
   },
+  metaStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+    marginTop: "14px",
+  },
+  metaInlineRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    alignItems: "center",
+  },
   emptyState: {
     padding: "18px",
     borderRadius: "12px",
@@ -953,6 +1044,26 @@ const styles = {
     borderRadius: "10px",
     fontSize: "13px",
   },
+  progressTrack: {
+    width: "100%",
+    height: "10px",
+    borderRadius: "999px",
+    backgroundColor: "#e5e7eb",
+    overflow: "hidden",
+    marginBottom: "8px",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: "999px",
+    backgroundColor: "#2563eb",
+    transition: "width 160ms ease",
+  },
+  progressLabel: {
+    margin: "0 0 14px",
+    color: "#64748b",
+    fontSize: "13px",
+    fontWeight: 600,
+  },
   form: {
     display: "flex",
     flexDirection: "column",
@@ -992,8 +1103,23 @@ const styles = {
     marginBottom: "8px",
     flexWrap: "wrap",
   },
+  findingBadgeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
   findingTitle: {
     color: "#0f172a",
+  },
+  aiTag: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: "999px",
+    fontSize: "11px",
+    fontWeight: 700,
+    backgroundColor: "#dbeafe",
+    color: "#1d4ed8",
   },
   findingDescription: {
     margin: 0,
@@ -1018,8 +1144,14 @@ const styles = {
     fontSize: "13px",
   },
   stepCard: {
-  border: "1px solid #e5e7eb",
-  borderRadius: "12px",
-  padding: "14px",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "14px",
+  },
+  stepActionRow: {
+    marginTop: "12px",
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
   },
 };

@@ -1,8 +1,18 @@
 const API = "http://127.0.0.1:8000";
 
+async function parseJsonResponse(res) {
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.error || "Request failed.");
+  }
+
+  return data;
+}
+
 export async function getHealth() {
   const res = await fetch(`${API}/health`);
-  return res.json();
+  return parseJsonResponse(res);
 }
 
 export async function startSession(labName) {
@@ -11,7 +21,14 @@ export async function startSession(labName) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ lab_name: labName }),
   });
-  return res.json();
+  return parseJsonResponse(res);
+}
+
+export async function launchLab(sessionId, labId) {
+  const res = await fetch(`${API}/labs/launch/${sessionId}/${labId}`, {
+    method: "POST",
+  });
+  return parseJsonResponse(res);
 }
 
 export async function addFinding(data) {
@@ -20,10 +37,10 @@ export async function addFinding(data) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  return res.json();
+  return parseJsonResponse(res);
 }
 
 export async function getReport(sessionId) {
   const res = await fetch(`${API}/reports/${sessionId}`);
-  return res.json();
+  return parseJsonResponse(res);
 }
