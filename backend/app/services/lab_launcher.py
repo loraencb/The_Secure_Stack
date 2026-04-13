@@ -1,5 +1,8 @@
 import docker
+<<<<<<< HEAD
 from copy import deepcopy
+=======
+>>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
 from app.labs.labs_config import LABS
 
 client = docker.from_env()
@@ -72,13 +75,18 @@ def launch_lab(session_id: int, lab_id: str):
 
         target.reload()
         port_info = target.attrs["NetworkSettings"]["Ports"].get("3000/tcp", [])
+<<<<<<< HEAD
 
         browser_url = None
         host_port = None
+=======
+        browser_url = None
+>>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
         if port_info:
             host_port = port_info[0]["HostPort"]
             browser_url = f"http://localhost:{host_port}"
 
+<<<<<<< HEAD
         steps = deepcopy(lab["steps"])
         if host_port:
             for step in steps:
@@ -86,6 +94,8 @@ def launch_lab(session_id: int, lab_id: str):
                 if "{target_port}" in hint:
                     step["command_hint"] = hint.replace("{target_port}", str(host_port))
 
+=======
+>>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
         return {
             "lab_id": lab_id,
             "lab_name": lab["name"],
@@ -94,7 +104,11 @@ def launch_lab(session_id: int, lab_id: str):
             "network_name": network.name,
             "target_alias": lab["target"]["alias"],
             "browser_url": browser_url,
+<<<<<<< HEAD
             "steps": steps,
+=======
+            "steps": lab["steps"],
+>>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
         }
 
     except Exception:

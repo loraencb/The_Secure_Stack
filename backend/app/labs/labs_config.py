@@ -10,7 +10,10 @@ LABS = {
             "image": "bkimminich/juice-shop",
             "container_name": "target-{session_id}",
             "ports": {"3000/tcp": None},
+<<<<<<< HEAD
             "app_port": 3000,
+=======
+>>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
             "alias": "target",
         },
         "steps": [
@@ -32,7 +35,11 @@ LABS = {
             {
                 "title": "Open the application",
                 "instruction": "Open the target in your browser.",
+<<<<<<< HEAD
                 "command_hint": "http://localhost:{target_port}",
+=======
+                "command_hint": "http://localhost:3000",
+>>>>>>> 572d7ef8aea8784f742454fa33eaec8a992b5577
             },
         ],
     }
