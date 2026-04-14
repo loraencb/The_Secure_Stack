@@ -1,10 +1,35 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
+import { WS_BASE_URL } from "../api/Client";
+
+const DEFAULT_SHELL_USER = "root";
+const DEFAULT_SHELL_PATH = "~/secure-stack-lab";
+const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const BACKEND_PROMPT_PATTERN =
+  /(^|\r?\n)\[stderr\]\s*([A-Za-z0-9_.-]+)@([A-Za-z0-9_.-]+):([^\r\n]*?)([#\$])\s*(?=$|\r?\n)/g;
+
+function buildShellMeta(containerLabel) {
+  return {
+    user: DEFAULT_SHELL_USER,
+    host: containerLabel || "workspace",
+    path: DEFAULT_SHELL_PATH,
+    marker: "#",
+  };
+}
+
+function formatShellPrompt({ user, host, path, marker }) {
+  return (
+    `\x1b[1;32m${user}@${host}\x1b[0m:` +
+    `\x1b[1;34m${path}\x1b[0m` +
+    `\x1b[1;37m${marker}\x1b[0m `
+  );
+}
 
 export default function LiveTerminal({
   sessionId,
+  containerLabel,
   onFeedback,
   onFindingSuggestion,
   onFindingAutoSaved,
@@ -16,6 +41,11 @@ export default function LiveTerminal({
   const socketRef = useRef(null);
   const activeCommandRef = useRef(null);
   const commandOutputRef = useRef("");
+  const promptVisibleRef = useRef(false);
+  const shellMetaRef = useRef(buildShellMeta(containerLabel));
+  const [terminalStatus, setTerminalStatus] = useState("connecting");
+  const [isFocused, setIsFocused] = useState(false);
+  const [shellMeta, setShellMeta] = useState(() => buildShellMeta(containerLabel));
 
   const onFeedbackRef = useRef(onFeedback);
   const onFindingSuggestionRef = useRef(onFindingSuggestion);
@@ -44,16 +74,54 @@ export default function LiveTerminal({
   }, [onCommandResult]);
 
   useEffect(() => {
+    const nextShellMeta = buildShellMeta(containerLabel);
+    shellMetaRef.current = nextShellMeta;
+    setShellMeta(nextShellMeta);
+  }, [containerLabel, sessionId]);
+
+  useEffect(() => {
     if (!sessionId || !terminalRef.current) return;
+
+    setTerminalStatus("connecting");
+    setIsFocused(false);
+    promptVisibleRef.current = false;
+    shellMetaRef.current = buildShellMeta(containerLabel);
+    setShellMeta(shellMetaRef.current);
 
     const term = new Terminal({
       cursorBlink: true,
+      cursorStyle: "block",
       rows: 20,
       cols: 80,
       convertEol: true,
+      fontFamily: '"IBM Plex Mono", "Cascadia Code", "Fira Code", monospace',
+      fontSize: 15,
+      fontWeight: 500,
+      lineHeight: 1.45,
+      letterSpacing: 0.2,
+      scrollback: 3000,
       theme: {
-        background: "#081427",
-        foreground: "#f9fafb",
+        background: "#050b14",
+        foreground: "#d9f7ff",
+        cursor: "#1af2a6",
+        cursorAccent: "#050b14",
+        selectionBackground: "rgba(36, 168, 255, 0.28)",
+        black: "#09101a",
+        red: "#ff6b81",
+        green: "#1af2a6",
+        yellow: "#ffd166",
+        blue: "#3ab8ff",
+        magenta: "#9a7bff",
+        cyan: "#59f1ff",
+        white: "#d9f7ff",
+        brightBlack: "#6d839f",
+        brightRed: "#ff91a3",
+        brightGreen: "#67ffc2",
+        brightYellow: "#ffe28b",
+        brightBlue: "#82d5ff",
+        brightMagenta: "#baa6ff",
+        brightCyan: "#97fbff",
+        brightWhite: "#f5feff",
       },
     });
 
@@ -64,15 +132,50 @@ export default function LiveTerminal({
 
     termInstanceRef.current = term;
 
-    const socket = new WebSocket(`ws://127.0.0.1:8000/ws/terminal/${sessionId}`);
+    const socket = new WebSocket(`${WS_BASE_URL}/ws/terminal/${sessionId}`);
     socketRef.current = socket;
 
     let currentLine = "";
     let isDisposed = false;
+    const terminalElement = terminalRef.current;
+    const writePrompt = () => {
+      term.write(formatShellPrompt(shellMetaRef.current));
+      promptVisibleRef.current = true;
+    };
+    const syncPromptFromOutput = (output) => {
+      let promptDetected = false;
+      const sanitizedOutput = output.replace(
+        BACKEND_PROMPT_PATTERN,
+        (match, leadingLineBreak, user, host, path, marker) => {
+          const nextShellMeta = {
+            user: user || DEFAULT_SHELL_USER,
+            host: host || containerLabel || "workspace",
+            path: (path || DEFAULT_SHELL_PATH).replace(ANSI_ESCAPE_PATTERN, ""),
+            marker: marker || "#",
+          };
+          promptDetected = true;
+          shellMetaRef.current = nextShellMeta;
+          setShellMeta(nextShellMeta);
+          return leadingLineBreak || "";
+        }
+      );
+
+      return {
+        output: sanitizedOutput,
+        promptDetected,
+      };
+    };
 
     socket.onopen = () => {
       if (isDisposed) return;
-      term.writeln(`[connected to session ${sessionId}]`);
+      setTerminalStatus("connected");
+      term.writeln(
+        `\x1b[1;36m[secure stack connected to session ${sessionId}]\x1b[0m`
+      );
+      term.writeln(
+        "\x1b[1;32m[workspace ready - validate the current guide step here]\x1b[0m"
+      );
+      writePrompt();
     };
 
     socket.onmessage = (event) => {
@@ -82,10 +185,25 @@ export default function LiveTerminal({
         const message = JSON.parse(event.data);
 
         if (message.type === "terminal_output") {
+          const { output, promptDetected } = syncPromptFromOutput(message.data);
+
           if (activeCommandRef.current) {
-            commandOutputRef.current += message.data;
+            commandOutputRef.current += output;
           }
-          term.write(message.data);
+
+          if (output) {
+            term.write(output);
+          }
+
+          if (promptDetected) {
+            if (promptVisibleRef.current && !currentLine && !activeCommandRef.current) {
+              term.write("\r\x1b[2K");
+            }
+
+            if (!promptVisibleRef.current || (!currentLine && !activeCommandRef.current)) {
+              writePrompt();
+            }
+          }
         } else if (message.type === "ai_feedback" && onFeedbackRef.current) {
           onFeedbackRef.current(message.data);
 
@@ -99,6 +217,10 @@ export default function LiveTerminal({
 
           activeCommandRef.current = null;
           commandOutputRef.current = "";
+
+          if (!promptVisibleRef.current) {
+            writePrompt();
+          }
         } else if (
           message.type === "finding_suggestion" &&
           onFindingSuggestionRef.current
@@ -111,18 +233,30 @@ export default function LiveTerminal({
           onFindingAutoSavedRef.current(message.data);
         }
       } catch {
-        term.write(event.data);
+        const { output, promptDetected } = syncPromptFromOutput(event.data);
+
+        if (output) {
+          term.write(output);
+        }
+
+        if (promptDetected && !promptVisibleRef.current) {
+          writePrompt();
+        }
       }
     };
 
     socket.onclose = () => {
       if (isDisposed) return;
-      term.writeln("\r\n[terminal disconnected]");
+      setTerminalStatus("disconnected");
+      promptVisibleRef.current = false;
+      term.writeln("\r\n\x1b[1;31m[terminal disconnected]\x1b[0m");
     };
 
     socket.onerror = () => {
       if (isDisposed) return;
-      term.writeln("\r\n[terminal socket error]");
+      setTerminalStatus("error");
+      promptVisibleRef.current = false;
+      term.writeln("\r\n\x1b[1;31m[terminal socket error]\x1b[0m");
     };
 
     const dataDisposable = term.onData((data) => {
@@ -132,16 +266,30 @@ export default function LiveTerminal({
 
       const code = data.charCodeAt(0);
 
+      if (!promptVisibleRef.current) {
+        return;
+      }
+
       if (code === 13) {
         const submitted = currentLine.trim();
 
         if (onFeedbackRef.current) onFeedbackRef.current(null);
-        if (submitted && onCommandSubmittedRef.current) {
+
+        if (!submitted) {
+          term.write("\r\n");
+          currentLine = "";
+          promptVisibleRef.current = false;
+          writePrompt();
+          return;
+        }
+
+        if (onCommandSubmittedRef.current) {
           onCommandSubmittedRef.current(submitted);
         }
 
-        activeCommandRef.current = submitted ? { command: submitted } : null;
+        activeCommandRef.current = { command: submitted };
         commandOutputRef.current = "";
+        promptVisibleRef.current = false;
 
         socket.send(currentLine);
         term.write("\r\n");
@@ -151,18 +299,24 @@ export default function LiveTerminal({
           currentLine = currentLine.slice(0, -1);
           term.write("\b \b");
         }
-      } else {
+      } else if (code >= 32) {
         currentLine += data;
         term.write(data);
       }
     });
 
     const handleResize = () => fitAddon.fit();
+    const handleFocusIn = () => setIsFocused(true);
+    const handleFocusOut = () => setIsFocused(false);
     window.addEventListener("resize", handleResize);
+    terminalElement.addEventListener("focusin", handleFocusIn);
+    terminalElement.addEventListener("focusout", handleFocusOut);
 
     return () => {
       isDisposed = true;
       window.removeEventListener("resize", handleResize);
+      terminalElement.removeEventListener("focusin", handleFocusIn);
+      terminalElement.removeEventListener("focusout", handleFocusOut);
       dataDisposable.dispose();
 
       if (socketRef.current) {
@@ -175,18 +329,44 @@ export default function LiveTerminal({
         termInstanceRef.current = null;
       }
     };
-  }, [sessionId]);
+  }, [containerLabel, sessionId]);
 
   return (
     <div
-      ref={terminalRef}
-      style={{
-        width: "100%",
-        height: "400px",
-        borderRadius: "12px",
-        overflow: "hidden",
-        backgroundColor: "#081427",
-      }}
-    />
+      className={`terminal-shell ${isFocused ? "terminal-shell--focused" : ""}`}
+    >
+      <div className="terminal-shell__chrome">
+        <div className="terminal-shell__lights" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+        <div className="terminal-shell__identity">
+          <span className="terminal-shell__prompt">
+            {shellMeta.user}@{shellMeta.host}
+          </span>
+          <span className="terminal-shell__path">:{shellMeta.path}</span>
+          <span className="terminal-shell__marker">{shellMeta.marker}</span>
+        </div>
+        <span
+          className={`terminal-shell__status terminal-shell__status--${terminalStatus}`}
+        >
+          {terminalStatus === "connected"
+            ? "Live shell"
+            : terminalStatus === "error"
+            ? "Connection issue"
+            : terminalStatus === "disconnected"
+            ? "Disconnected"
+            : "Connecting"}
+        </span>
+      </div>
+
+      <div className="terminal-shell__footer">
+        <span>Interactive lab shell</span>
+        <span>{isFocused ? "Input active" : "Click terminal to focus"}</span>
+      </div>
+
+      <div ref={terminalRef} className="terminal-shell__viewport" />
+    </div>
   );
 }
