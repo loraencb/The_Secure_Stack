@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 import { useSecureStack } from "../../context/SecureStackContext";
 import { buildSessionPath } from "../../utils/routes";
 
@@ -13,6 +14,7 @@ function getNavClass({ isActive }) {
 }
 
 export default function AppLayout() {
+  const { user, signOut } = useAuth();
   const { sessionId, activeLabDefinition, summary } = useSecureStack();
 
   return (
@@ -41,6 +43,10 @@ export default function AppLayout() {
           </nav>
 
           <div className="topbar__status">
+            <div className="topbar__status-card topbar__status-card--user">
+              <span className="topbar__status-label">Signed In As</span>
+              <strong>{user?.display_name || user?.email || "Secure Stack User"}</strong>
+            </div>
             <div className="topbar__status-card">
               <span className="topbar__status-label">Current Lab</span>
               <strong>{activeLabDefinition?.name || "Ready to launch"}</strong>
@@ -57,6 +63,13 @@ export default function AppLayout() {
                 Resume Session
               </NavLink>
             ) : null}
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={signOut}
+            >
+              Sign Out
+            </button>
           </div>
         </div>
       </header>

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import StatusBanner from "../StatusBanner";
 import {
@@ -6,6 +6,7 @@ import {
   SESSION_STAGE_META,
   getNextSessionSection,
   getSessionJourneyPercent,
+  getSessionSection,
   getSessionSectionFromPathname,
   getSessionSectionState,
 } from "../../config/sessionSections";
@@ -52,7 +53,6 @@ export default function SessionShell({
   const location = useLocation();
   const sectionViewportRef = useRef(null);
   const hasMountedSectionRef = useRef(false);
-  const [visitedSections, setVisitedSections] = useState([]);
   const {
     activeLabConfig,
     activeLabDefinition,
@@ -61,14 +61,15 @@ export default function SessionShell({
     clearMessage,
     sessionSyncing,
     sessionLoadError,
-    labInfo,
     startingSession,
     launchingLab,
     generatingReport,
     summary,
+    workflow,
     startNewSession,
     launchActiveLab,
     generateSessionReport,
+    recordVisitedSection,
   } = useSecureStack();
 
   async function handleStartFreshSession() {
@@ -104,7 +105,18 @@ export default function SessionShell({
   const currentSessionId = routeSessionId || sessionId;
   const currentSection = getSessionSectionFromPathname(location.pathname);
   const nextSection = getNextSessionSection(currentSection.slug);
+  const recommendedSection = workflow.nextRecommendation?.targetSection
+    ? getSessionSection(workflow.nextRecommendation.targetSection)
+    : nextSection;
   const journeyPercent = getSessionJourneyPercent(currentSection.slug);
+  const launchButtonClass =
+    workflow.nextRecommendation.key === "launch_environment"
+      ? "button button--primary"
+      : "button button--secondary";
+  const reportButtonClass =
+    workflow.nextRecommendation.key === "generate_report"
+      ? "button button--primary"
+      : "button button--secondary";
 
   useEffect(() => {
     if (!currentSessionId || invalidSessionId) {
@@ -124,26 +136,16 @@ export default function SessionShell({
 
   useEffect(() => {
     if (!currentSessionId || invalidSessionId) {
-      setVisitedSections([]);
       return;
     }
 
-    setVisitedSections([currentSection.slug]);
-  }, [currentSessionId, invalidSessionId]);
-
-  useEffect(() => {
-    if (!currentSessionId || invalidSessionId) {
-      return;
-    }
-
-    setVisitedSections((previousSections) => {
-      if (previousSections.includes(currentSection.slug)) {
-        return previousSections;
-      }
-
-      return [...previousSections, currentSection.slug];
-    });
-  }, [currentSessionId, currentSection.slug, invalidSessionId]);
+    recordVisitedSection(currentSection.slug);
+  }, [
+    currentSection.slug,
+    currentSessionId,
+    invalidSessionId,
+    recordVisitedSection,
+  ]);
 
   return (
     <div className="page-stack">
@@ -168,13 +170,7 @@ export default function SessionShell({
           </div>
           <div className="hero__metric">
             <span>Status</span>
-            <strong>
-              {sessionLoadError
-                ? "Needs attention"
-                : labInfo
-                ? "Environment ready"
-                : "Waiting for launch"}
-            </strong>
+            <strong>{sessionLoadError ? "Needs attention" : workflow.status.label}</strong>
           </div>
         </div>
       </section>
@@ -185,12 +181,18 @@ export default function SessionShell({
             <span className={badgeClass(sessionLoadError ? "danger" : "success")}>
               {sessionLoadError ? "Session error" : `Session #${currentSessionId || "?"}`}
             </span>
-            <span className={badgeClass(labInfo ? "success" : "muted")}>
-              {labInfo ? "Environment live" : "Not launched"}
+            <span
+              className={badgeClass(
+                workflow.environmentLaunched ? "success" : "muted"
+              )}
+            >
+              {workflow.environmentLaunched
+                ? "Environment live"
+                : "Not launched"}
             </span>
             {summary.activeLabStep ? (
               <span className={badgeClass("info")}>
-                Current task: {summary.activeLabStep.title}
+                Current task: {workflow.currentTaskLabel}
               </span>
             ) : null}
           </div>
@@ -206,7 +208,7 @@ export default function SessionShell({
             </button>
             <button
               type="button"
-              className="button button--secondary"
+              className={launchButtonClass}
               onClick={handleLaunch}
               disabled={!currentSessionId || launchingLab}
             >
@@ -214,7 +216,7 @@ export default function SessionShell({
             </button>
             <button
               type="button"
-              className="button button--secondary"
+              className={reportButtonClass}
               onClick={handleGenerateReport}
               disabled={!currentSessionId || generatingReport}
             >
@@ -245,22 +247,20 @@ export default function SessionShell({
 
             <div className="session-journey__summary">
               <div className="tag-row">
-                <span className={badgeClass("info")}>
-                  Stage {currentSection.step} of {SESSION_SECTIONS.length}
+                <span className={badgeClass(workflow.status.tone)}>
+                  {workflow.status.label}
                 </span>
                 <span className={badgeClass("success")}>
-                  {visitedSections.length}/{SESSION_SECTIONS.length} reviewed
+                  {workflow.completedMilestones}/{workflow.milestones.length} milestones complete
                 </span>
               </div>
-              <strong>Current section: {currentSection.label}</strong>
-              <p>
-                {currentSection.description}
-              </p>
+              <strong>Recommended action: {workflow.nextRecommendation.label}</strong>
+              <p>{workflow.nextRecommendation.description}</p>
               <div className="session-journey__next">
                 <span className="detail-label">Recommended next section</span>
                 <p>
-                  {nextSection
-                    ? `${nextSection.label}: ${nextSection.description}`
+                  {recommendedSection
+                    ? `${recommendedSection.label}: ${recommendedSection.description}`
                     : "Reports is the final review space for packaging the strongest evidence into a session summary."}
                 </p>
               </div>
@@ -274,8 +274,8 @@ export default function SessionShell({
             />
           </div>
           <p className="session-guide-progress">
-            Guide progress: {visitedSections.length} of {SESSION_SECTIONS.length}{" "}
-            sections reviewed in this session.
+            Workflow progress: {workflow.workflowPercent}% complete across{" "}
+            {workflow.milestones.length} milestones. {workflow.status.detail}
           </p>
         </div>
 
@@ -285,7 +285,7 @@ export default function SessionShell({
               SESSION_STAGE_META[
                 getSessionSectionState(section.slug, currentSection.slug)
               ];
-            const isVisited = visitedSections.includes(section.slug);
+            const isVisited = workflow.visitedSections.includes(section.slug);
 
             return (
               <NavLink
@@ -391,7 +391,7 @@ export default function SessionShell({
             </div>
 
             <aside className="session-shell__rail">
-              <SessionSidebar visitedSections={visitedSections} />
+              <SessionSidebar visitedSections={workflow.visitedSections} />
             </aside>
           </div>
         )}

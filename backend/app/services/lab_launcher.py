@@ -1,14 +1,30 @@
-import docker
 from copy import deepcopy
 import time
 
+import docker
 import requests
 
+from app.config import settings
 from app.labs.labs_config import LABS
+
+import logging
+
+logger = logging.getLogger("securestack.lab_launcher")
 
 
 def get_docker_client():
-    return docker.from_env()
+    try:
+        if settings.docker_host:
+            client = docker.DockerClient(base_url=settings.docker_host)
+        else:
+            client = docker.from_env()
+        client.ping()
+        return client
+    except docker.errors.DockerException as exc:
+        logger.exception("docker_unavailable host=%s", settings.docker_host or "from_env")
+        raise RuntimeError(
+            "Docker is unavailable. Ensure the Docker daemon is running and the backend can access the Docker socket."
+        ) from exc
 
 
 def get_or_create_network(name: str):
@@ -62,6 +78,21 @@ def wait_for_http_service(browser_url: str, timeout: float = 60.0):
     )
 
 
+def build_container_limits() -> dict:
+    limits = {}
+    if settings.container_memory_limit:
+        limits["mem_limit"] = settings.container_memory_limit
+    if settings.container_nano_cpus:
+        limits["nano_cpus"] = settings.container_nano_cpus
+    return limits
+
+
+def build_target_urls(host_port: str) -> tuple[str, str]:
+    browser_url = f"http://{settings.target_public_host}:{host_port}"
+    probe_url = f"http://{settings.target_probe_host}:{host_port}"
+    return browser_url, probe_url
+
+
 def launch_lab(session_id: int, lab_id: str):
     client = get_docker_client()
     lab = LABS.get(lab_id)
@@ -79,6 +110,7 @@ def launch_lab(session_id: int, lab_id: str):
     safe_remove_network(network_name)
 
     network = get_or_create_network(network_name)
+    container_limits = build_container_limits()
 
     target = None
     attacker = None
@@ -89,6 +121,7 @@ def launch_lab(session_id: int, lab_id: str):
             name=target_name,
             detach=True,
             ports=lab["target"].get("ports"),
+            **container_limits,
         )
         network.connect(target, aliases=[lab["target"]["alias"]])
         target.start()
@@ -100,6 +133,7 @@ def launch_lab(session_id: int, lab_id: str):
             detach=True,
             tty=True,
             stdin_open=True,
+            **container_limits,
         )
         network.connect(attacker)
         attacker.start()
@@ -112,8 +146,19 @@ def launch_lab(session_id: int, lab_id: str):
         host_port = None
         if port_info:
             host_port = port_info[0]["HostPort"]
-            browser_url = f"http://localhost:{host_port}"
-            wait_for_http_service(browser_url)
+            browser_url, probe_url = build_target_urls(host_port)
+            logger.info(
+                "lab_target_port_bound session_id=%s lab_id=%s host_port=%s browser_url=%s probe_url=%s",
+                session_id,
+                lab_id,
+                host_port,
+                browser_url,
+                probe_url,
+            )
+            wait_for_http_service(
+                probe_url,
+                timeout=settings.target_ready_timeout_seconds,
+            )
 
         steps = deepcopy(lab["steps"])
         if host_port:

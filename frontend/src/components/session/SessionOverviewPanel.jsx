@@ -5,8 +5,17 @@ import { getEvidencePreview } from "../../utils/session";
 import { badgeClass } from "./sessionUi";
 
 export default function SessionOverviewPanel() {
-  const { activeLabConfig, activeLabDefinition, labInfo, sessionId, summary } =
-    useSecureStack();
+  const {
+    activeLabConfig,
+    activeLabDefinition,
+    labInfo,
+    sessionRecord,
+    sessionId,
+    summary,
+    workflow,
+  } = useSecureStack();
+  const runtimeReady = workflow.environmentLaunched;
+  const runtimeInfo = labInfo;
 
   return (
     <div className="page-stack">
@@ -50,18 +59,25 @@ export default function SessionOverviewPanel() {
           <div className="content-stack">
             <div className="detail-box detail-box--tertiary">
               <span className="detail-label">Current task</span>
-              <p>{summary.activeLabStep?.title || "All guided tasks completed."}</p>
+              <p>{workflow.currentTaskLabel}</p>
             </div>
             <div className="detail-box detail-box--tertiary">
               <span className="detail-label">Recommended next action</span>
-              <p>{summary.recommendedNextAction}</p>
+              <p>
+                <strong>{workflow.nextRecommendation.label}:</strong>{" "}
+                {workflow.nextRecommendation.description}
+              </p>
+            </div>
+            <div className="detail-box detail-box--tertiary">
+              <span className="detail-label">Workflow state</span>
+              <p>{workflow.status.detail}</p>
             </div>
           </div>
 
           <div className="callout callout--info">
             <strong>Suggested flow:</strong> Review the task and environment
-            here, open the guide for the walkthrough, then switch into the live
-            workspace to validate your evidence.
+            here, then follow the current recommendation:{" "}
+            {workflow.nextRecommendation.description}
           </div>
 
           <div className="session-cta-row">
@@ -82,7 +98,7 @@ export default function SessionOverviewPanel() {
                 className="button button--ghost"
                 to={buildSessionPath(sessionId, "reports")}
               >
-                Review Findings
+                Open Reports
               </Link>
             ) : null}
           </div>
@@ -94,29 +110,59 @@ export default function SessionOverviewPanel() {
               <span className="eyebrow">Environment</span>
               <h2>Runtime Status</h2>
             </div>
-            <span className={badgeClass(labInfo ? "success" : "muted")}>
-              {labInfo ? "Launched" : "Waiting to launch"}
+            <span className={badgeClass(runtimeReady ? "success" : "muted")}>
+              {runtimeReady ? "Launched" : "Waiting to launch"}
             </span>
           </div>
 
-          {labInfo ? (
+          {runtimeInfo ? (
             <div className="content-stack">
               <div className="detail-grid detail-grid--two">
                 <div className="detail-box detail-box--tertiary">
                   <span className="detail-label">Attacker</span>
-                  <p>{labInfo.attacker_container}</p>
+                  <p>{runtimeInfo.attacker_container || "Unavailable"}</p>
                 </div>
                 <div className="detail-box detail-box--tertiary">
                   <span className="detail-label">Target</span>
-                  <p>{labInfo.target_container}</p>
+                  <p>{runtimeInfo.target_container || "Unavailable"}</p>
                 </div>
                 <div className="detail-box detail-box--tertiary">
                   <span className="detail-label">Network</span>
-                  <p>{labInfo.network_name}</p>
+                  <p>{runtimeInfo.network_name || "Unavailable"}</p>
                 </div>
                 <div className="detail-box detail-box--tertiary">
                   <span className="detail-label">Browser URL</span>
-                  <p>{labInfo.browser_url || "No browser URL exposed."}</p>
+                  <p>{runtimeInfo.browser_url || "No browser URL exposed."}</p>
+                </div>
+              </div>
+            </div>
+          ) : runtimeReady ? (
+            <div className="empty-card">
+              <div className="content-stack">
+                <strong>Environment launched</strong>
+                <p>
+                  The session has a persisted launch record from{" "}
+                  {sessionRecord?.environment_launched_at
+                    ? new Date(
+                        sessionRecord.environment_launched_at
+                      ).toLocaleString()
+                    : "this run"}
+                  , but the runtime details are not available in the current
+                  view yet.
+                </p>
+                <div className="inline-actions">
+                  <Link
+                    className="button button--secondary"
+                    to={buildSessionPath(sessionId, "workspace")}
+                  >
+                    Open Workspace
+                  </Link>
+                  <Link
+                    className="button button--ghost"
+                    to={buildSessionPath(sessionId, "reports")}
+                  >
+                    Open Reports
+                  </Link>
                 </div>
               </div>
             </div>
@@ -252,6 +298,84 @@ export default function SessionOverviewPanel() {
                   to={buildSessionPath(sessionId, "workspace")}
                 >
                   Open Workspace
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="surface-card">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Replay</span>
+            <h2>Investigation Timeline</h2>
+          </div>
+          <span
+            className={badgeClass(
+              workflow.timeline.latestEntry?.tone || "muted"
+            )}
+          >
+            {workflow.timeline.entryCount
+              ? `${workflow.timeline.entryCount} events`
+              : "No replay yet"}
+          </span>
+        </div>
+
+        <p className="section-lead">
+          This timeline turns the current session state into a readable
+          investigation trail, from launch and task validation through evidence,
+          findings, and reporting.
+        </p>
+
+        {workflow.timeline.entries.length ? (
+          <div className="timeline-list">
+            {workflow.timeline.entries.map((entry) => (
+              <article key={entry.key} className="timeline-entry">
+                <div
+                  className={`timeline-entry__marker timeline-entry__marker--${entry.tone}`}
+                  aria-hidden="true"
+                />
+                <div className="timeline-entry__body">
+                  <div className="section-heading">
+                    <div>
+                      <h3>{entry.label}</h3>
+                      <p>{entry.detail}</p>
+                    </div>
+                    <span className={badgeClass(entry.tone)}>
+                      {entry.category}
+                    </span>
+                  </div>
+                  <div className="timeline-entry__meta">
+                    <span>
+                      {entry.timestampLabel ||
+                        "Ordered from the current session state"}
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-card">
+            <div className="content-stack">
+              <strong>No timeline events yet</strong>
+              <p>
+                Start the lab, move through the guide and workspace, and save
+                evidence to build a readable replay of the investigation.
+              </p>
+              <div className="inline-actions">
+                <Link
+                  className="button button--primary"
+                  to={buildSessionPath(sessionId, "workspace")}
+                >
+                  Open Workspace
+                </Link>
+                <Link
+                  className="button button--ghost"
+                  to={buildSessionPath(sessionId, "guide")}
+                >
+                  Review Guide
                 </Link>
               </div>
             </div>

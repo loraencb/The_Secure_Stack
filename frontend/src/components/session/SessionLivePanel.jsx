@@ -20,9 +20,11 @@ export default function SessionLivePanel() {
     terminalFeedback,
     labInfo,
     summary,
+    workflow,
     launchingLab,
     launchActiveLab,
     clearFeedback,
+    handleCommandSubmitted,
     handleTerminalFeedback,
     handleFindingSuggestion,
     handleAutoSavedFinding,
@@ -39,9 +41,24 @@ export default function SessionLivePanel() {
 
   const assessment =
     assessmentMeta[terminalFeedback?.assessment] || assessmentMeta.neutral;
-  const launchButtonClass = labInfo
+  const environmentReady = workflow.environmentLaunched;
+  const runtimeContainerLabel =
+    labInfo?.attacker_container || (sessionId ? `attacker-${sessionId}` : "workspace");
+  const launchButtonClass = environmentReady
     ? "button button--secondary"
     : "button button--primary";
+  const workspaceLead = !workflow.environmentLaunched
+    ? workflow.nextRecommendation.description
+    : workflow.readyForReport
+    ? "You have saved findings ready for reporting. Keep validating here or move to Reports to generate the session summary."
+    : workflow.needsEvidenceContext
+    ? "You already have saved findings, but the report still needs stronger task-linked evidence. Capture one clearer command-backed observation before wrapping up."
+    : workflow.canCaptureEvidence
+    ? "Command activity has been captured for this session. Save the strongest evidence as a finding when it is ready."
+    : "This is where the guide becomes action. Run commands, inspect the output, and use the AI review to decide what belongs in your findings.";
+  const aiReviewLead = workflow.hasCommandActivity
+    ? "The latest command review helps you decide whether the evidence is strong enough to save as a finding or whether the active step needs another pass."
+    : "This panel turns the latest command into a quick review so you can see what happened, why it matters, and what to do next without breaking your flow.";
 
   return (
     <div className="page-stack">
@@ -52,8 +69,8 @@ export default function SessionLivePanel() {
             <h2>Terminal</h2>
           </div>
           <div className="inline-actions">
-            <span className={badgeClass(labInfo ? "success" : "muted")}>
-              {labInfo ? "Connected" : "Waiting for launch"}
+            <span className={badgeClass(environmentReady ? "success" : "muted")}>
+              {environmentReady ? "Connected" : "Waiting for launch"}
             </span>
             <button
               type="button"
@@ -66,33 +83,40 @@ export default function SessionLivePanel() {
           </div>
         </div>
 
-        <p className="section-lead">
-          This is where the guide becomes action. Run commands, inspect the
-          output, and use the AI review to decide what belongs in your findings.
-        </p>
+        <p className="section-lead">{workspaceLead}</p>
 
         <div className="session-inline-meta">
-          <span className={badgeClass(labInfo ? "success" : "muted")}>
-            {labInfo ? "Environment ready" : "Launch required"}
+          <span className={badgeClass(environmentReady ? "success" : "muted")}>
+            {environmentReady ? "Environment ready" : "Launch required"}
           </span>
           <span className={badgeClass(terminalFeedback ? "info" : "muted")}>
             {terminalFeedback
               ? "AI reacting to latest command"
               : "AI waiting for command"}
           </span>
+          <span
+            className={badgeClass(
+              workflow.hasCommandActivity ? "info" : "muted"
+            )}
+          >
+            {workflow.hasCommandActivity
+              ? `${workflow.commandsRunCount} commands captured`
+              : "No command activity yet"}
+          </span>
           {summary.activeLabStep ? (
             <span className={badgeClass("sky")}>
-              Current step: {summary.activeLabStep.title}
+              Current step: {workflow.currentTaskLabel}
             </span>
           ) : null}
         </div>
 
-        {labInfo ? (
+        {environmentReady ? (
           <LiveTerminal
-            key={`${sessionId}-${labInfo.attacker_container}`}
+            key={`${sessionId}-${runtimeContainerLabel}`}
             sessionId={sessionId}
-            containerLabel={labInfo.attacker_container}
+            containerLabel={runtimeContainerLabel}
             onFeedback={handleTerminalFeedback}
+            onCommandSubmitted={handleCommandSubmitted}
             onFindingSuggestion={handleFindingSuggestion}
             onFindingAutoSaved={handleAutoSavedFinding}
             onCommandResult={handleCommandResult}
@@ -101,10 +125,7 @@ export default function SessionLivePanel() {
           <div className="empty-card">
             <div className="content-stack">
               <strong>The workspace is waiting for the lab environment</strong>
-              <p>
-                Review the current guide step, then launch the environment here
-                when you are ready to test it live.
-              </p>
+              <p>{workflow.nextRecommendation.description}</p>
               <div className="inline-actions">
                 <Link
                   className="button button--ghost"
@@ -140,11 +161,7 @@ export default function SessionLivePanel() {
           </button>
         </div>
 
-        <p className="section-lead">
-          This panel turns the latest command into a quick review so you can
-          see what happened, why it matters, and what to do next without
-          breaking your flow.
-        </p>
+        <p className="section-lead">{aiReviewLead}</p>
 
         {terminalFeedback ? (
           <div className="content-stack ai-review-layout">
@@ -171,7 +188,7 @@ export default function SessionLivePanel() {
                 <p>{terminalFeedback.phase || "general-navigation"}</p>
               </ReviewMetric>
               <ReviewMetric label="Current guide focus">
-                <p>{summary.activeLabStep?.title || "No active guide step"}</p>
+                <p>{workflow.currentTaskLabel}</p>
               </ReviewMetric>
             </div>
 
@@ -216,9 +233,9 @@ export default function SessionLivePanel() {
             <div className="content-stack">
               <strong>No AI review yet</strong>
               <p>
-                After you run a command, this panel will organize the feedback
-                into a summary, why it matters, and the recommended next action
-                for the current lab step.
+                {workflow.hasCommandActivity
+                  ? "The session has command activity, but there is no current AI review visible. Run another command or return to the guide if you need to realign the active step."
+                  : "After you run a command, this panel will organize the feedback into a summary, why it matters, and the recommended next action for the current lab step."}
               </p>
               <div className="panel-grid panel-grid--double ai-review-grid">
                 <div className="detail-box ai-review-card">

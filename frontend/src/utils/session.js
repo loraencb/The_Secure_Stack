@@ -140,6 +140,15 @@ export function setStoredLabId(labId) {
   window.localStorage.removeItem(LAB_STORAGE_KEY);
 }
 
+export function clearStoredSessionState() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  window.localStorage.removeItem(LAB_STORAGE_KEY);
+}
+
 export function getCompletedStepIndexes(steps = [], taskProgress = {}) {
   return steps.reduce((completed, step, index) => {
     if (taskProgress[step.task_id]?.status === "completed") {
@@ -207,7 +216,16 @@ export function getRecommendedNextAction(activeStep, activeTaskProgress) {
 }
 
 export function sortFindings(findings = []) {
-  return [...findings].sort((a, b) => (b.id || 0) - (a.id || 0));
+  return [...findings].sort((a, b) => {
+    const firstCreatedAt = Date.parse(a?.created_at || "") || 0;
+    const secondCreatedAt = Date.parse(b?.created_at || "") || 0;
+
+    if (secondCreatedAt !== firstCreatedAt) {
+      return secondCreatedAt - firstCreatedAt;
+    }
+
+    return (b.id || 0) - (a.id || 0);
+  });
 }
 
 export function getSessionSummary({

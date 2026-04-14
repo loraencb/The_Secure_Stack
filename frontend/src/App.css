@@ -101,6 +101,10 @@
   border: 1px solid rgba(128, 105, 85, 0.12);
 }
 
+.topbar__status-card--user {
+  min-width: 180px;
+}
+
 .topbar__status-label {
   font-size: 0.76rem;
   text-transform: uppercase;
@@ -122,6 +126,29 @@
 
 .page-stack > * {
   animation: rise-in 260ms ease both;
+}
+
+.auth-page {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.auth-loading-shell {
+  min-height: calc(100vh - 120px);
+  justify-content: center;
+}
+
+.auth-card {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.auth-form {
+  gap: 14px;
+}
+
+.auth-toggle {
+  justify-content: flex-end;
 }
 
 .hero,
@@ -1834,6 +1861,78 @@
   gap: 16px;
 }
 
+.timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.timeline-entry {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.timeline-entry__marker {
+  border-radius: 999px;
+  background: rgba(127, 149, 173, 0.36);
+  box-shadow: 0 0 10px rgba(127, 149, 173, 0.18);
+}
+
+.timeline-entry__marker--success {
+  background: rgba(25, 230, 140, 0.78);
+  box-shadow: 0 0 12px rgba(25, 230, 140, 0.2);
+}
+
+.timeline-entry__marker--warning {
+  background: rgba(255, 209, 102, 0.82);
+  box-shadow: 0 0 12px rgba(255, 209, 102, 0.18);
+}
+
+.timeline-entry__marker--danger {
+  background: rgba(255, 107, 129, 0.84);
+  box-shadow: 0 0 12px rgba(255, 107, 129, 0.18);
+}
+
+.timeline-entry__marker--info,
+.timeline-entry__marker--sky {
+  background: rgba(36, 168, 255, 0.78);
+  box-shadow: 0 0 12px rgba(36, 168, 255, 0.18);
+}
+
+.timeline-entry__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid rgba(126, 172, 255, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(36, 168, 255, 0.06), transparent 32%),
+    linear-gradient(180deg, rgba(10, 20, 36, 0.76), rgba(9, 18, 32, 0.72));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
+.timeline-entry__body h3 {
+  margin: 0;
+  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+  font-size: 1.02rem;
+}
+
+.timeline-entry__body p {
+  margin: 6px 0 0;
+}
+
+.timeline-entry__meta {
+  padding-top: 10px;
+  border-top: 1px solid rgba(126, 172, 255, 0.12);
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
 .finding-card--result {
   display: flex;
   flex-direction: column;
@@ -1848,6 +1947,15 @@
 
 .finding-card__summary,
 .finding-card__evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-draft-card,
+.finding-card__task-context,
+.finding-card__task-objective,
+.finding-card__recent-command {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2155,17 +2263,24 @@
 }
 
 .finding-card__summary,
+.finding-card__task-context,
+.finding-card__task-objective,
+.finding-card__recent-command,
 .finding-card__impact,
 .finding-card__recommendation {
   padding-bottom: 2px;
 }
 
+.finding-card__task-objective,
+.finding-card__recent-command,
 .finding-card__impact,
 .finding-card__recommendation {
   padding-top: 10px;
   border-top: 1px solid rgba(126, 172, 255, 0.12);
 }
 
+.report-draft-card .terminal-evidence,
+.finding-card__recent-command .terminal-evidence,
 .finding-card__evidence .terminal-evidence {
   padding: 16px 18px;
   border-color: rgba(36, 168, 255, 0.22);

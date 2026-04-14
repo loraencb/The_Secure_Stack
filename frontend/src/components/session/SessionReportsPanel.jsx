@@ -2,54 +2,8 @@ import { Link } from "react-router-dom";
 import { useSecureStack } from "../../context/SecureStackContext";
 import { buildSessionPath } from "../../utils/routes";
 import { riskMeta, severityMeta } from "../../utils/session";
+import { buildFindingContent } from "../../utils/findings";
 import { badgeClass } from "./sessionUi";
-
-const FINDING_SECTION_PATTERN = /(?:^|\n)(Evidence|Impact|Recommendation):\s*/g;
-const FINDING_KEYS = {
-  Evidence: "evidence",
-  Impact: "impact",
-  Recommendation: "recommendation",
-};
-
-function splitFindingContent(description = "") {
-  const content = description.trim();
-  const matches = [];
-  let match;
-  FINDING_SECTION_PATTERN.lastIndex = 0;
-
-  while ((match = FINDING_SECTION_PATTERN.exec(content)) !== null) {
-    matches.push({
-      key: FINDING_KEYS[match[1]],
-      markerIndex: match.index + (match[0].startsWith("\n") ? 1 : 0),
-      contentStart: FINDING_SECTION_PATTERN.lastIndex,
-    });
-  }
-
-  if (!matches.length) {
-    return {
-      summary: content,
-      evidence: "",
-      impact: "",
-      recommendation: "",
-    };
-  }
-
-  const findingContent = {
-    summary: content.slice(0, matches[0].markerIndex).trim(),
-    evidence: "",
-    impact: "",
-    recommendation: "",
-  };
-
-  matches.forEach((section, index) => {
-    const nextSection = matches[index + 1];
-    findingContent[section.key] = content
-      .slice(section.contentStart, nextSection?.markerIndex ?? content.length)
-      .trim();
-  });
-
-  return findingContent;
-}
 
 function getFindingSeverityClass(severity = "Medium") {
   return `finding-card--severity-${severity.toLowerCase()}`;
@@ -76,7 +30,9 @@ export default function SessionReportsPanel() {
     findingForm,
     savingFinding,
     summary,
+    workflow,
     updateFindingForm,
+    applyEvidenceFindingDraft,
     saveFinding,
     generateSessionReport,
   } = useSecureStack();
@@ -92,10 +48,8 @@ export default function SessionReportsPanel() {
   const highSeverityCount = findings.filter(
     (finding) => finding.severity === "High"
   ).length;
-  const aiAssistedCount = findings.filter((finding) => {
-    const findingContent = splitFindingContent(finding.description || "");
-    return Boolean(findingContent.evidence);
-  }).length;
+  const evidenceStats = workflow.findingEvidenceStats;
+  const evidenceContext = workflow.evidenceContext;
 
   return (
     <div className="page-stack">
@@ -105,18 +59,13 @@ export default function SessionReportsPanel() {
             <span className="eyebrow">Session Results</span>
             <h2>Findings And Report</h2>
           </div>
-          <span className={badgeClass(report ? "success" : "info")}>
-            {report
-              ? "Report ready"
-              : findings.length
-              ? "Evidence ready for summary"
-              : "Waiting for findings"}
+          <span className={badgeClass(workflow.reportReadiness.tone)}>
+            {workflow.reportReadiness.label}
           </span>
         </div>
 
         <p className="section-lead">
-          Turn validated workspace output into saved findings here, then
-          generate a concise report when the session has enough evidence.
+          {workflow.reportReadiness.detail}
         </p>
 
         <div className="reports-summary-grid">
@@ -125,16 +74,41 @@ export default function SessionReportsPanel() {
             <strong>{findings.length}</strong>
           </div>
           <div className="stat-card">
-            <span>High severity</span>
-            <strong>{highSeverityCount}</strong>
+            <span>Evidence-backed</span>
+            <strong>{evidenceStats.evidenceBackedCount}</strong>
           </div>
           <div className="stat-card">
-            <span>AI-assisted</span>
-            <strong>{aiAssistedCount}</strong>
+            <span>Task-linked</span>
+            <strong>{evidenceStats.taskLinkedCount}</strong>
           </div>
           <div className="stat-card">
             <span>Report</span>
-            <strong>{report ? "Ready" : "Not generated"}</strong>
+            <strong>{workflow.reportGenerated ? "Ready" : "Not generated"}</strong>
+          </div>
+        </div>
+
+        <div className="panel-grid panel-grid--double">
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Linked task</span>
+            <p>{evidenceContext.taskContext || workflow.currentTaskLabel}</p>
+          </div>
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Task objective</span>
+            <p>
+              {evidenceContext.taskObjective ||
+                "The active task objective will appear here once the workflow has enough context."}
+            </p>
+          </div>
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Recent command evidence</span>
+            <p>
+              {evidenceContext.recentCommand ||
+                "No recent command is linked to this reporting flow yet."}
+            </p>
+          </div>
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Readiness cue</span>
+            <p>{evidenceContext.readiness.detail}</p>
           </div>
         </div>
 
@@ -167,9 +141,63 @@ export default function SessionReportsPanel() {
               <span className="eyebrow">Capture Finding</span>
               <h3>Save Evidence While It Is Fresh</h3>
             </div>
-            <span className={badgeClass("sky")}>
-              {savingFinding ? "Saving entry..." : "Manual entry"}
+            <span className={badgeClass(evidenceContext.readiness.tone)}>
+              {savingFinding
+                ? "Saving entry..."
+                : evidenceContext.readiness.label}
             </span>
+          </div>
+
+          <div className="detail-box detail-box--accent report-draft-card">
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">Evidence Draft</span>
+                <h3>{evidenceContext.draftTitle}</h3>
+              </div>
+              <span className={badgeClass(evidenceContext.readiness.tone)}>
+                {evidenceContext.readiness.label}
+              </span>
+            </div>
+
+            <p className="section-lead">{evidenceContext.readiness.detail}</p>
+
+            <div className="panel-grid panel-grid--double">
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Finding will link to</span>
+                <p>{evidenceContext.taskContext || "Current session context"}</p>
+              </div>
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Recent command</span>
+                <p>
+                  {evidenceContext.recentCommand ||
+                    "Run a command in the workspace to seed this draft."}
+                </p>
+              </div>
+            </div>
+
+            {evidenceContext.evidence ? (
+              <div className="finding-card__evidence">
+                <span className="detail-label">Evidence snapshot</span>
+                <pre className="terminal-evidence">{evidenceContext.evidence}</pre>
+              </div>
+            ) : null}
+
+            <div className="inline-actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={applyEvidenceFindingDraft}
+                disabled={!evidenceContext.hasEvidence}
+              >
+                Use Evidence Draft
+              </button>
+              <Link
+                className="button button--ghost"
+                to={buildSessionPath(sessionId, "workspace")}
+              >
+                Return to Workspace
+              </Link>
+            </div>
           </div>
 
           <form className="form-grid reports-form" onSubmit={saveFinding}>
@@ -195,12 +223,17 @@ export default function SessionReportsPanel() {
 
             <textarea
               name="description"
-              placeholder="Describe the finding. Optional sections: Evidence:, Impact:, Recommendation:"
+              placeholder="Describe the finding. Optional sections: Task Context:, Task Objective:, Recent Command:, Evidence:, Impact:, Recommendation:"
               value={findingForm.description}
               onChange={updateFindingForm}
               rows="6"
               className="field field--textarea"
             />
+
+            <p className="section-note">
+              Saved findings automatically keep the current task, recent
+              command, and evidence snapshot when that context is available.
+            </p>
 
             <button
               type="submit"
@@ -231,16 +264,20 @@ export default function SessionReportsPanel() {
 
           <p className="section-lead">
             Findings collect the evidence worth carrying forward from the
-            workspace into the final session report.
+            workspace into the final session report, including the task and
+            command context that produced it.
           </p>
 
           {findings.length ? (
             <div className="stack-list reports-findings-list">
               {findings.map((finding, index) => {
-                const findingContent = splitFindingContent(
-                  finding.description || ""
+                const findingContent = buildFindingContent(finding);
+                const isEvidenceBacked = Boolean(
+                  findingContent.evidence || findingContent.recentCommand
                 );
-                const aiAssisted = Boolean(findingContent.evidence);
+                const isTaskLinked = Boolean(
+                  findingContent.taskContext || findingContent.taskObjective
+                );
 
                 return (
                   <article
@@ -264,14 +301,34 @@ export default function SessionReportsPanel() {
                         >
                           {finding.severity}
                         </span>
-                        {aiAssisted ? (
-                          <span className={badgeClass("sky")}>AI-assisted</span>
+                        {isTaskLinked ? (
+                          <span className={badgeClass("info")}>Task-linked</span>
+                        ) : null}
+                        {isEvidenceBacked ? (
+                          <span className={badgeClass("sky")}>
+                            Evidence-backed
+                          </span>
                         ) : null}
                       </div>
                     </div>
 
                     <div className="finding-card__body">
                       {[
+                        renderFindingBlock(
+                          "Task Context",
+                          findingContent.taskContext,
+                          "finding-card__task-context"
+                        ),
+                        renderFindingBlock(
+                          "Task Objective",
+                          findingContent.taskObjective,
+                          "finding-card__task-objective"
+                        ),
+                        renderFindingBlock(
+                          "Recent Command",
+                          findingContent.recentCommand,
+                          "finding-card__recent-command"
+                        ),
                         renderFindingBlock(
                           "Summary",
                           findingContent.summary || "No summary available.",
@@ -297,7 +354,8 @@ export default function SessionReportsPanel() {
                         .map((block) => (
                           <div key={block.label} className={block.className}>
                             <span className="detail-label">{block.label}</span>
-                            {block.label === "Evidence" ? (
+                            {block.label === "Evidence" ||
+                            block.label === "Recent Command" ? (
                               <pre className="terminal-evidence">
                                 {block.value}
                               </pre>
@@ -316,9 +374,9 @@ export default function SessionReportsPanel() {
               <div className="content-stack">
                 <strong>No findings saved yet</strong>
                 <p>
-                  Use the workspace to gather evidence, then save the strongest
-                  observations here or accept an AI suggestion from the session
-                  rail.
+                  {workflow.hasCommandActivity
+                    ? "Commands have already been captured for this session. Save the strongest evidence as a finding here or accept an AI suggestion from the session rail."
+                    : "Use the workspace to gather evidence, then save the strongest observations here or accept an AI suggestion from the session rail."}
                 </p>
                 <div className="inline-actions">
                   <Link
@@ -348,19 +406,20 @@ export default function SessionReportsPanel() {
             <span
               className={badgeClass(
                 riskMeta[report?.analysis?.risk_level]?.tone ||
-                  (report ? "info" : "muted")
+                  (workflow.reportGenerated ? "info" : "muted")
               )}
             >
               {report?.analysis?.risk_level
                 ? `Risk: ${report.analysis.risk_level}`
+                : workflow.reportGenerated
+                ? "Generated previously"
                 : "Not generated yet"}
             </span>
           </div>
 
           <p className="section-lead">
-            The report turns the saved findings into a concise summary with key
-            issues and recommendations you can review before wrapping up the
-            lab.
+            The report is the final synthesis of the saved findings, the linked
+            task context, and the evidence captured during the session.
           </p>
 
           {report ? (
@@ -376,6 +435,9 @@ export default function SessionReportsPanel() {
                   </span>
                   <span className={badgeClass("info")}>
                     {findings.length} finding{findings.length === 1 ? "" : "s"}
+                  </span>
+                  <span className={badgeClass("sky")}>
+                    {evidenceStats.evidenceAwareCount} evidence-backed
                   </span>
                 </div>
                 <span className="detail-label">Executive Summary</span>
@@ -414,17 +476,25 @@ export default function SessionReportsPanel() {
             <div className="empty-card">
               <div className="content-stack">
                 <strong>
-                  {findings.length
+                  {report
+                    ? "Report ready"
+                    : workflow.reportGenerated
+                    ? "Report generated previously"
+                    : findings.length
                     ? "Ready for a report draft"
                     : "No report data yet"}
                 </strong>
                 <p>
-                  {findings.length
-                    ? `You already have ${findings.length} finding${findings.length === 1 ? "" : "s"} saved. Generate the report to turn them into a session summary.`
+                  {workflow.reportGenerated
+                    ? "A report has already been generated for this session. Generate it again if you want to refresh the current summary from the latest saved findings."
+                    : findings.length
+                    ? workflow.reportReadiness.detail
+                    : workflow.hasCommandActivity
+                    ? "Reports are close, but the session still needs at least one saved finding before the report feels complete."
                     : "Reports appear after the workspace produces evidence and you save it as findings."}
                 </p>
                 <div className="inline-actions">
-                  {findings.length ? (
+                  {(findings.length || workflow.reportGenerated) ? (
                     <button
                       type="button"
                       className="button button--primary"

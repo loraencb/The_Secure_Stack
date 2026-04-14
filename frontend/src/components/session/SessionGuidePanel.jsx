@@ -41,6 +41,7 @@ export default function SessionGuidePanel() {
     sessionId,
     taskProgress,
     summary,
+    workflow,
     completeBrowserStep,
   } = useSecureStack();
   const [selectedStepIndex, setSelectedStepIndex] = useState(() => {
@@ -162,7 +163,8 @@ export default function SessionGuidePanel() {
 
         <p className="section-lead">
           Follow one step at a time here, then take it into the workspace when
-          you are ready to validate it live.
+          you are ready to validate it live. The workflow recommendation updates
+          as the session state changes.
         </p>
 
         <div className="progress-bar">
@@ -329,11 +331,12 @@ export default function SessionGuidePanel() {
           </div>
         </div>
 
-        <p className="section-lead">
-          Use the live workspace to validate step {safeStepIndex + 1}. When you
-          have useful evidence, move to reports to save findings and build the
-          session summary.
-        </p>
+        <p className="section-lead">{workflow.nextRecommendation.description}</p>
+
+        <div className="detail-box detail-box--tertiary">
+          <span className="detail-label">Workflow recommendation</span>
+          <p>{workflow.nextRecommendation.reason}</p>
+        </div>
 
         <div className="session-cta-row">
           <Link

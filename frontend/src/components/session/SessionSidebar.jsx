@@ -1,14 +1,15 @@
 import { Link, useLocation } from "react-router-dom";
 import {
   SESSION_SECTIONS,
-  getNextSessionSection,
   getPreviousSessionSection,
   getSessionJourneyPercent,
+  getSessionSection,
   getSessionSectionFromPathname,
 } from "../../config/sessionSections";
 import { useSecureStack } from "../../context/SecureStackContext";
 import { buildSessionPath } from "../../utils/routes";
 import { badgeClass, getFindingSeverityTone } from "./sessionUi";
+import { getSectionNavigationLabel } from "../../utils/workflow";
 
 export default function SessionSidebar({ visitedSections = [] }) {
   const location = useLocation();
@@ -17,34 +18,19 @@ export default function SessionSidebar({ visitedSections = [] }) {
     activeLabDefinition,
     sessionId,
     findingSuggestion,
-    summary,
+    workflow,
     acceptingSuggestion,
     acceptSuggestedFinding,
     dismissSuggestedFinding,
   } = useSecureStack();
   const currentSection = getSessionSectionFromPathname(location.pathname);
   const previousSection = getPreviousSessionSection(currentSection.slug);
-  const nextSection = getNextSessionSection(currentSection.slug);
+  const recommendedSection = workflow.nextRecommendation?.targetSection
+    ? getSessionSection(workflow.nextRecommendation.targetSection)
+    : null;
+  const navigationTarget = recommendedSection?.slug || "workspace";
+  const navigationLabel = getSectionNavigationLabel(navigationTarget);
   const journeyPercent = getSessionJourneyPercent(currentSection.slug);
-
-  let nextMoveCopy =
-    "Use the current section to stay oriented, then continue to the next stage when you are ready.";
-
-  if (currentSection.slug === "overview") {
-    nextMoveCopy =
-      "Review the task and runtime context here, then open the guide before you move into the live workspace.";
-  } else if (currentSection.slug === "guide") {
-    nextMoveCopy =
-      "Once the current step makes sense, switch into the workspace to validate it and gather the evidence you want to keep.";
-  } else if (currentSection.slug === "workspace") {
-    nextMoveCopy = summary.sortedFindings.length
-      ? "You already have findings saved. Keep testing here or move to reports to package the strongest evidence."
-      : "Use the terminal to validate the current step, then move to reports once you have evidence worth saving.";
-  } else if (currentSection.slug === "reports") {
-    nextMoveCopy = summary.sortedFindings.length
-      ? "Review the captured findings, generate the report, and return to the workspace only if you need more proof."
-      : "Reports become useful after the workspace produces evidence. Return to the terminal or guide if you still need material.";
-  }
 
   async function handleAcceptFinding() {
     try {
@@ -82,8 +68,16 @@ export default function SessionSidebar({ visitedSections = [] }) {
             </p>
           </div>
           <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Workflow state</span>
+            <p>{workflow.status.detail}</p>
+          </div>
+          <div className="detail-box detail-box--tertiary">
             <span className="detail-label">Active lab</span>
             <p>{activeLabDefinition?.name || activeLabConfig.name}</p>
+          </div>
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Active task</span>
+            <p>{workflow.currentTaskLabel}</p>
           </div>
           <div className="detail-box detail-box--tertiary">
             <span className="detail-label">Current section</span>
@@ -100,14 +94,29 @@ export default function SessionSidebar({ visitedSections = [] }) {
           <div className="detail-box detail-box--tertiary">
             <span className="detail-label">Recommended next section</span>
             <p>
-              {nextSection
-                ? `${nextSection.label}: ${nextSection.description}`
+              {recommendedSection
+                ? `${recommendedSection.label}: ${recommendedSection.description}`
                 : "Reports is the final review space for capturing evidence and generating the session summary."}
             </p>
           </div>
           <div className="detail-box detail-box--tertiary">
             <span className="detail-label">What to do next</span>
-            <p>{nextMoveCopy}</p>
+            <p>
+              <strong>{workflow.nextRecommendation.label}:</strong>{" "}
+              {workflow.nextRecommendation.description}
+            </p>
+          </div>
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Live session activity</span>
+            <p>
+              {workflow.hasCommandActivity
+                ? `${workflow.commandsRunCount} commands captured${workflow.lastCommand ? `, latest: ${workflow.lastCommand}` : "."}`
+                : "No command activity captured yet."}
+            </p>
+          </div>
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">Evidence and report</span>
+            <p>{workflow.reportReadiness.detail}</p>
           </div>
           <div className="inline-actions">
             {previousSection ? (
@@ -120,14 +129,9 @@ export default function SessionSidebar({ visitedSections = [] }) {
             ) : null}
             <Link
               className="button button--secondary"
-              to={buildSessionPath(
-                sessionId,
-                nextSection ? nextSection.slug : "workspace"
-              )}
+              to={buildSessionPath(sessionId, navigationTarget)}
             >
-              {nextSection
-                ? `Continue to ${nextSection.label}`
-                : "Return to Workspace"}
+              {navigationLabel}
             </Link>
           </div>
         </div>

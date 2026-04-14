@@ -1,284 +1,326 @@
 # Secure Stack
 
-A web-based cybersecurity training platform designed for classroom use, combining hands-on penetration testing labs with structured instruction and real-time AI-assisted guidance.
+Secure Stack is a multi-user cybersecurity training platform that combines containerized labs, a guided session workspace, live terminal interaction, AI-assisted coaching, evidence-aware findings, and report generation in one workflow-aware application.
 
----
+## What Secure Stack Does
 
-## Overview
+Secure Stack is built around a real lab journey:
 
-Secure Stack is an instructional cyber training environment that integrates:
+1. A user registers or signs in.
+2. The user selects a lab and starts a session.
+3. The backend launches an isolated container-based environment.
+4. The learner works through a guided lab workspace.
+5. Terminal activity, task progress, and AI feedback shape the session flow.
+6. Evidence is turned into findings and findings are turned into reports.
+7. Sessions can be refreshed, resumed, and revisited later from session history.
 
-- Containerized vulnerable lab environments
-- Structured lab manuals and guided exercises
-- Real-time terminal-aware AI coaching
-- Session tracking and assessment tools
+The result is more than a lab launcher. It is a guided cyber investigation platform with durable session state and backend-backed ownership.
 
-The system is designed to support cybersecurity education by allowing students to learn through direct interaction with realistic environments while receiving continuous feedback on their actions.
+## Current Highlights
 
----
+- Multi-user authentication and authorization with protected routes and user-owned data.
+- Multi-page React frontend with a polished session mini-app.
+- Nested session workspace with `Overview`, `Guide`, `Workspace`, and `Reports`.
+- Real-time terminal access over WebSockets with a shell-style prompt and Docker-backed exec sessions.
+- Structured lab modules loaded from `labs/*/metadata.json`.
+- Task progress persistence with evidence capture and instructional AI evaluation.
+- Workflow-aware guidance that reacts to launch state, progress, findings, and reports.
+- Evidence-aware findings and report readiness cues.
+- Investigation timeline and durable session history.
+- Deployment-ready Docker Compose stack with frontend, backend, and PostgreSQL.
 
-## Core Concept
+## Core Capabilities
 
-Each lab in Secure Stack is a complete instructional module composed of:
+### Guided Session Workspace
 
-1. Lab Environment  
-   A containerized vulnerable system deployed per session.
+Each active lab session behaves like a mini application inside the platform:
 
-2. Lab Manual  
-   A structured guide including objectives, tasks, and reflection questions.
+- `Overview` shows session status, progress, environment details, and investigation timeline.
+- `Guide` walks the learner through the current lab step by step.
+- `Workspace` provides the live terminal, AI review, and active task context.
+- `Reports` organizes findings, evidence context, and report generation.
 
-3. Real-Time Coaching Engine  
-   An AI-driven system that observes terminal activity and provides contextual feedback.
+The frontend routes currently include:
 
-4. Assessment Layer  
-   Tracks progress, task completion, and student submissions.
+- `/login`
+- `/`
+- `/labs`
+- `/session/:id/overview`
+- `/session/:id/guide`
+- `/session/:id/workspace`
+- `/session/:id/reports`
+- `/profile`
 
-This combination transforms the platform from a simple lab launcher into a classroom-ready training system.
+### Workflow and Evidence Intelligence
 
----
+Secure Stack derives useful guidance from real session signals:
 
-## Key Features
+- active session and lab metadata
+- environment launch state
+- current lab task and task progress
+- command activity and captured evidence
+- findings and report generation state
+- visited session sections
 
-### Interactive Lab Environments
-- Launch and manage isolated lab environments using Docker
-- Per-session container orchestration
-- Reset and stop functionality
-- Initial labs include:
-  - OWASP Juice Shop
-  - DVWA
+This intelligence powers:
 
----
+- next recommended actions
+- current step and completion feel
+- evidence-aware finding drafts
+- report readiness cues
+- investigation timeline summaries
 
-### Structured Lab Manuals
-Each lab includes:
-- Learning objectives
-- Prerequisites
-- Step-by-step tasks
-- Reflection questions
-- Submission requirements
-- Ethical use guidelines
+### Authentication and Data Ownership
 
-Manuals are stored in Markdown and version-controlled.
+The platform now supports:
 
----
+- user registration and login
+- bearer-token authentication
+- protected API routes
+- per-user session ownership
+- per-user finding and report isolation
+- protected terminal WebSocket access
 
-### Real-Time AI Coaching
+### Container-Based Lab Infrastructure
 
-The platform includes a terminal-aware AI system that:
+Lab environments are launched per session using Docker. The backend manages:
 
-- Monitors commands and output in real time
-- Identifies the current phase of the exercise
-- Detects incorrect or inefficient actions
-- Provides:
-  - Explanations of tool output
-  - Guidance on next steps
-  - Warnings when off-track
-  - Reinforcement of correct methodology
+- attacker and target containers
+- per-session network names
+- launch/runtime metadata
+- terminal exec sessions inside the attacker container
+- clearer failure handling when Docker or lab services are unavailable
 
-The AI operates as an active observer, not a passive chatbot.
+### Durable Persistence
 
----
+Secure Stack persists:
 
-### Session Tracking
+- users and auth tokens
+- sessions and ownership
+- environment launch metadata
+- task progress and evidence state
+- findings with task and evidence context
+- report-generated milestones
+- compact session history for the Profile page
 
-- Tracks commands executed during a session
-- Stores tool outputs and notes
-- Maintains session state and progress
-- Enables replay and review of activity
+The frontend still keeps lightweight UI-only state when useful, but backend-backed data is preferred during hydration after refresh, reconnect, and resume.
 
----
-
-### Assessment and Submissions
-
-- Task-based lab structure
-- Student submissions per task
-- Evidence collection
-- Progress tracking
-- Instructor review capability
-
----
-
-## System Architecture
+## Architecture
 
 ### Frontend
-- React or Next.js
-- Displays lab manuals, terminal interface, and AI feedback
-- Real-time updates via WebSockets
+
+- React
+- React Router
+- xterm.js terminal experience
+- lazy-loaded session panels
+- auth-aware application shell
 
 ### Backend
+
 - FastAPI
-- Handles:
-  - Authentication
-  - Session lifecycle
-  - Lab orchestration
-  - Command logging
-  - AI integration
+- SQLAlchemy models and routers
+- bearer-token authentication with stored auth tokens
+- structured error handling and logging
+- WebSocket terminal transport
 
 ### Database
-- PostgreSQL
-- Stores:
-  - Users
-  - Labs
-  - Sessions
-  - Commands
-  - Submissions
-  - AI observations
 
-### Lab Infrastructure
-- Docker / Docker Compose
-- Isolated environments per session
-- Dynamic container lifecycle management
+- PostgreSQL recommended for deployment
+- SQLite supported as a local fallback
 
 ### AI Layer
-- LLM-based coaching engine
-- Context-aware feedback using:
-  - Recent commands
-  - Tool outputs
-  - Lab objectives
-  - Session state
 
----
+- terminal-aware coaching and summary support
+- configurable external AI service endpoint
+- graceful degradation when AI is unavailable
 
-## Project Structure
+## Repository Layout
+
 ```text
-secure-stack/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── models/
-│   │   ├── services/
-│   │   └── main.py
-│   ├── tests/
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── src/
-│   └── package.json
-│
-├── labs/
-│   ├── juice-shop/
-│   │   ├── docker-compose.yml
-│   │   ├── metadata.json
-│   │   ├── student_manual.md
-│   │   └── instructor_guide.md
-│   └── dvwa/
-│
-├── docs/
-└── README.md
+The_Secure_Stack/
+|-- backend/
+|   |-- app/
+|   |   |-- routers/
+|   |   |-- services/
+|   |   |-- config.py
+|   |   |-- database.py
+|   |   `-- main.py
+|   |-- tests/
+|   |-- Dockerfile
+|   `-- start.sh
+|-- frontend/
+|   |-- src/
+|   |-- Dockerfile
+|   `-- nginx.conf
+|-- labs/
+|   |-- attacker/
+|   |-- juice-shop/
+|   `-- juice-shop-recon/
+|-- .env.example
+|-- docker-compose.yml
+|-- DEPLOYMENT.md
+|-- secure_stack_roadmap.md
+`-- README.md
 ```
----
 
-## Lab Module Design
+## Lab Module Structure
 
-Each lab is self-contained and includes:
+Labs are module-driven and discovered from `labs/*/metadata.json`.
 
-- Docker environment configuration
-- Metadata definition
-- Student manual (Markdown)
-- Instructor guide
-- Task and checkpoint definitions
+A typical lab module can include:
 
-Example:
+- `metadata.json`
+- `student_manual.md`
+- `instructor_guide.md`
+- Docker runtime configuration
+- task definitions, hints, remediation guidance, and success criteria
 
-labs/juice-shop/
-├── docker-compose.yml
-├── metadata.json
-├── student_manual.md
-├── instructor_guide.md
-└── rubric.json
+This keeps lab content version-controlled and reusable without hardcoding every lab into the backend or frontend.
 
----
+## API Overview
 
-## Session Workflow
+Major backend surfaces include:
 
-1. User logs in
-2. User selects a lab
-3. Backend creates a session
-4. Lab environment is launched via Docker
-5. User interacts with the target
-6. Terminal activity is captured
-7. AI coaching engine provides real-time feedback
-8. User completes tasks and submits responses
-9. Session is closed and summarized
+- `/auth/*` for registration, login, logout, and current-user lookup
+- `/labs/*` for lab definitions and environment launch
+- `/sessions/*` for session create, fetch, and history
+- `/task-progress/*` for task progress and evidence persistence
+- `/findings/*` for saved findings
+- `/reports/*` for report generation
+- `/ws/*` for live terminal sessions
 
----
+Health check:
 
-## AI Coaching Workflow
+- `GET /health`
 
-1. Terminal events are captured (commands, output)
-2. Events are processed and classified
-3. Session state is updated
-4. Relevant context is built
-5. AI generates feedback when appropriate
-6. Feedback is displayed in real time
+## Quick Start
 
----
+### Recommended: Docker Compose
 
-## Security Considerations
+1. Copy the environment template:
 
-- All labs run in isolated Docker networks
-- No direct user access to host system
-- Backend mediates all container operations
-- Session-based resource control
-- Controlled lab images only
+```bash
+cp .env.example .env
+```
 
----
+2. Set real values for at least:
 
-## MVP Scope
+- `SECURESTACK_AUTH_TOKEN_SECRET`
+- `POSTGRES_PASSWORD`
+- `SECURESTACK_DATABASE_URL`
+- `SECURESTACK_OLLAMA_URL` if you want live AI responses
 
-The initial version includes:
+3. Start the stack:
 
-- User authentication
-- Lab selection interface
-- One fully functional lab (Juice Shop)
-- Lab manual integration
-- Session-based container launch
-- Command and activity logging
-- Real-time AI coaching (basic)
-- Session summary generation
+```bash
+docker compose up --build
+```
 
----
+4. Open:
 
-## Future Enhancements
+- Frontend: `http://localhost:8080`
+- Backend API: `http://localhost:8000`
+- Health check: `http://localhost:8000/health`
 
-- Additional lab modules
-- Advanced checkpoint detection
-- Instructor dashboard
-- Automated grading
-- Vector database for retrieval-based coaching
-- Multi-user classroom management
-- VM-based environments
-- Terminal emulation (xterm.js)
+For the full deployment guide, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
----
+### Local Development
 
-## Educational Use Case
+Backend:
 
-Secure Stack is designed to support:
+```bash
+cd backend
+python -m app.bootstrap
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
-- Undergraduate cybersecurity courses
-- Hands-on lab sessions
-- Guided penetration testing exercises
-- Independent student practice
-- Instructor-led demonstrations
+Frontend:
 
-The platform enables scalable instruction by augmenting human teaching with real-time AI feedback.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
----
+The Vite frontend defaults to proxied `/api` and `/ws` paths for local development.
+
+## Important Environment Variables
+
+Secure Stack now relies on environment-based configuration instead of hardcoded deployment assumptions.
+
+Common values include:
+
+- `SECURESTACK_DATABASE_URL`
+- `SECURESTACK_DATABASE_PATH`
+- `SECURESTACK_AUTH_TOKEN_SECRET`
+- `SECURESTACK_CORS_ORIGINS`
+- `SECURESTACK_OLLAMA_URL`
+- `SECURESTACK_TARGET_PUBLIC_HOST`
+- `SECURESTACK_TARGET_PROBE_HOST`
+- Docker and runtime resource settings
+
+`SECURESTACK_TARGET_PUBLIC_HOST` and `SECURESTACK_TARGET_PROBE_HOST` are especially important in Dockerized deployment:
+
+- the browser should open the target using `localhost`
+- the backend container should probe target readiness using `host.docker.internal`
+
+See [.env.example](.env.example) and [DEPLOYMENT.md](DEPLOYMENT.md) for the supported values.
+
+## Testing and Validation
+
+### Automated Checks
+
+Backend test suite:
+
+```bash
+python -m unittest backend.tests.test_auth_workflow
+```
+
+Frontend production build:
+
+```bash
+cd frontend
+npm run build
+```
+
+### Manual Smoke Test
+
+A practical end-to-end validation flow is:
+
+1. Register a new user.
+2. Start a lab session from `Labs`.
+3. Launch the environment.
+4. Move through `Overview`, `Guide`, and `Workspace`.
+5. Run commands in the live terminal.
+6. Confirm AI feedback appears.
+7. Save a finding with evidence context.
+8. Generate a report.
+9. Refresh the session.
+10. Confirm timeline, findings, report state, and history rehydrate correctly.
+11. Open `Profile` and confirm the session appears in history.
+
+## Deployment Notes
+
+- PostgreSQL is the recommended deployment database.
+- SQLite remains available for lightweight local use.
+- The backend needs Docker socket access to launch lab containers and open terminal exec sessions.
+- The frontend is served through Nginx in the Compose setup.
+- The backend includes clearer logging for auth errors, launch failures, database issues, and AI service problems.
+
+## Current Status
+
+Secure Stack has moved well beyond a capstone demo baseline. The current codebase includes:
+
+- multi-user auth and route protection
+- backend-backed session persistence
+- workflow-aware guidance
+- evidence-aware findings and report generation
+- session replay timeline and durable history
+- containerized deployment support
+- backend tests for the core owned-session workflow
+
+The next planned work is tracked in [secure_stack_roadmap.md](secure_stack_roadmap.md).
 
 ## License
 
-This project is intended for educational and research purposes.
-
-All lab environments must be used in controlled settings and in accordance with ethical cybersecurity practices.
-
----
-
-## Status
-
-In active development.
-
-Initial focus:
-- Core lab orchestration
-- Lab manual integration
-- Real-time AI coaching engine
+This project is intended for educational and research use. All lab environments should be used ethically, in controlled settings, and only with systems that are explicitly part of the training environment.

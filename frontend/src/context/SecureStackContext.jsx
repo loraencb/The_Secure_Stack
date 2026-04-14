@@ -1,10 +1,11 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import {
   addFinding,
   completeTaskProgress,
   getFindings,
   getLabDefinition,
   getReport,
+  getSession,
   getTaskProgress,
   launchLab,
   startSession,
@@ -25,18 +26,42 @@ import {
   setStoredSessionId,
   sortFindings,
 } from "../utils/session";
+import {
+  getDefaultWorkflowState,
+  getSessionWorkflow,
+  getStoredWorkflowState,
+  setStoredWorkflowState,
+} from "../utils/workflow";
+import { mergeFindingEvidenceContext } from "../utils/findings";
 
 const SecureStackContext = createContext(null);
 
+function buildPersistedLabInfo(sessionRecord) {
+  if (!sessionRecord?.environment_launched_at) {
+    return null;
+  }
+
+  return {
+    attacker_container:
+      sessionRecord.attacker_container ||
+      (sessionRecord.id ? `attacker-${sessionRecord.id}` : null),
+    target_container: sessionRecord.target_container || null,
+    network_name: sessionRecord.network_name || null,
+    browser_url: sessionRecord.browser_url || null,
+  };
+}
+
 export function SecureStackProvider({ children }) {
+  const initialSessionId = getStoredSessionId();
   const [activeLabId, setActiveLabId] = useState(() =>
     getStoredLabId(DEFAULT_LAB_ID)
   );
   const [labDefinitions, setLabDefinitions] = useState({});
   const [labCatalogLoading, setLabCatalogLoading] = useState(true);
   const [labCatalogError, setLabCatalogError] = useState("");
-  const [sessionId, setSessionId] = useState(() => getStoredSessionId());
+  const [sessionId, setSessionId] = useState(() => initialSessionId);
   const [report, setReport] = useState(null);
+  const [sessionRecord, setSessionRecord] = useState(null);
   const [message, setMessage] = useState("");
   const [terminalFeedback, setTerminalFeedback] = useState(null);
   const [findingSuggestion, setFindingSuggestion] = useState(null);
@@ -55,6 +80,11 @@ export function SecureStackProvider({ children }) {
     severity: "Medium",
     description: "",
   });
+  const [workflowState, setWorkflowState] = useState(() =>
+    getStoredWorkflowState(initialSessionId)
+  );
+  const [workflowStateSessionId, setWorkflowStateSessionId] =
+    useState(initialSessionId);
 
   const activeLabConfig = getLabCatalogEntry(activeLabId);
   const activeLabDefinition = labDefinitions[activeLabId] || null;
@@ -116,11 +146,31 @@ export function SecureStackProvider({ children }) {
   }, [sessionId]);
 
   useEffect(() => {
+    if (!sessionId) {
+      setWorkflowStateSessionId(null);
+      setWorkflowState(getDefaultWorkflowState());
+      return;
+    }
+
+    setWorkflowStateSessionId(sessionId);
+    setWorkflowState(getStoredWorkflowState(sessionId));
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || workflowStateSessionId !== sessionId) {
+      return;
+    }
+
+    setStoredWorkflowState(sessionId, workflowState);
+  }, [sessionId, workflowState, workflowStateSessionId]);
+
+  useEffect(() => {
     setStoredLabId(activeLabId);
   }, [activeLabId]);
 
   useEffect(() => {
     if (!sessionId) {
+      setSessionRecord(null);
       setTaskProgress({});
       setFindings([]);
       setSessionSyncing(false);
@@ -132,6 +182,46 @@ export function SecureStackProvider({ children }) {
     setSessionLoadError("");
 
     async function syncSessionData() {
+      try {
+        const sessionData = await getSession(sessionId);
+        if (!cancelled) {
+          setSessionRecord(sessionData);
+          setLabInfo(buildPersistedLabInfo(sessionData));
+          if (sessionData.lab_id) {
+            setActiveLabId(sessionData.lab_id);
+            const syncedDefinition = labDefinitions[sessionData.lab_id];
+            if (syncedDefinition?.tasks?.length) {
+              setLabSteps(syncedDefinition.tasks);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Session sync error:", error);
+
+        if (!cancelled) {
+          if (error.message === "Session not found") {
+            setSessionId(null);
+            setSessionRecord(null);
+            setLabInfo(null);
+            setTaskProgress({});
+            setFindings([]);
+            setSessionLoadError("Session not found.");
+            setMessage("Previous session could not be restored.");
+            setSessionSyncing(false);
+            return;
+          }
+
+          setSessionRecord(null);
+          setLabInfo(null);
+          setTaskProgress({});
+          setFindings([]);
+          setSessionLoadError(error.message || "Failed to load session.");
+          setSessionSyncing(false);
+        }
+
+        return;
+      }
+
       try {
         const progressRecords = await getTaskProgress(sessionId);
         if (!cancelled) {
@@ -171,7 +261,7 @@ export function SecureStackProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [labDefinitions, sessionId]);
 
   const labCatalog = LAB_CATALOG.map((lab) => ({
     ...lab,
@@ -182,6 +272,17 @@ export function SecureStackProvider({ children }) {
     labSteps,
     taskProgress,
     findings,
+  });
+  const workflow = getSessionWorkflow({
+    sessionId,
+    sessionRecord,
+    summary,
+    labSteps,
+    labInfo,
+    report,
+    findings,
+    taskProgress,
+    workflowState,
   });
 
   async function ensureLabDefinition(labId = activeLabId) {
@@ -201,12 +302,14 @@ export function SecureStackProvider({ children }) {
   function resetTransientSessionState(definition) {
     setTaskProgress({});
     setReport(null);
+    setSessionRecord(null);
     setTerminalFeedback(null);
     setFindingSuggestion(null);
     setFindings([]);
     setLabInfo(null);
     setLabSteps(definition?.tasks || []);
     setSessionLoadError("");
+    setWorkflowState(getDefaultWorkflowState());
   }
 
   async function startNewSession(labId = activeLabId) {
@@ -222,9 +325,17 @@ export function SecureStackProvider({ children }) {
         return labDefinitions[labId] || null;
       });
 
-      const result = await startSession(labConfig.sessionLabName);
+      const result = await startSession(labConfig.sessionLabName, labId);
+      const nextWorkflowState = {
+        ...getDefaultWorkflowState(),
+        sessionStartedAt: result.start_time || new Date().toISOString(),
+      };
+      setStoredWorkflowState(result.id, nextWorkflowState);
       setSessionId(result.id);
+      setWorkflowStateSessionId(result.id);
       resetTransientSessionState(definition);
+      setSessionRecord(result);
+      setWorkflowState(nextWorkflowState);
       setMessage(`Session ${result.id} started successfully.`);
       return result;
     } catch (error) {
@@ -252,7 +363,12 @@ export function SecureStackProvider({ children }) {
     setSessionLoadError("");
     setActiveLabId(labId);
     setSessionId(nextSessionId);
+    setSessionRecord(null);
+    setWorkflowStateSessionId(nextSessionId);
+    setWorkflowState(getStoredWorkflowState(nextSessionId));
     setReport(null);
+    setTaskProgress({});
+    setFindings([]);
     setTerminalFeedback(null);
     setFindingSuggestion(null);
     setLabInfo(null);
@@ -278,6 +394,24 @@ export function SecureStackProvider({ children }) {
       const data = await launchLab(sessionId, activeLabId);
       setLabSteps(mergeLabSteps(definition?.tasks || [], data.steps || []));
       setLabInfo(data);
+      setSessionRecord((prev) =>
+        prev
+          ? {
+              ...prev,
+              lab_id: activeLabId,
+              environment_launched_at: new Date().toISOString(),
+              attacker_container: data.attacker_container || prev.attacker_container,
+              target_container: data.target_container || prev.target_container,
+              network_name: data.network_name || prev.network_name,
+              browser_url: data.browser_url || prev.browser_url,
+            }
+          : prev
+      );
+      setWorkflowState((prev) => ({
+        ...prev,
+        environmentLaunchedAt:
+          prev.environmentLaunchedAt || new Date().toISOString(),
+      }));
       setTerminalFeedback(null);
       setFindingSuggestion(null);
       setMessage("Lab launched successfully.");
@@ -343,6 +477,45 @@ export function SecureStackProvider({ children }) {
     setTerminalFeedback(feedback);
   }
 
+  const recordVisitedSection = useCallback((sectionSlug) => {
+    if (!sectionSlug) {
+      return;
+    }
+
+    setWorkflowState((prev) => {
+      if (prev.visitedSections.includes(sectionSlug)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        visitedSections: [...prev.visitedSections, sectionSlug],
+        sectionHistory: [
+          ...prev.sectionHistory,
+          {
+            section: sectionSlug,
+            visitedAt: new Date().toISOString(),
+          },
+        ],
+      };
+    });
+  }, []);
+
+  const handleCommandSubmitted = useCallback((command) => {
+    const nextCommand = command?.trim();
+
+    if (!nextCommand) {
+      return;
+    }
+
+    setWorkflowState((prev) => ({
+      ...prev,
+      commandsRunCount: prev.commandsRunCount + 1,
+      lastCommand: nextCommand,
+      lastCommandAt: new Date().toISOString(),
+    }));
+  }, []);
+
   function clearFeedback() {
     setTerminalFeedback(null);
   }
@@ -352,7 +525,19 @@ export function SecureStackProvider({ children }) {
   }
 
   function handleAutoSavedFinding(savedFinding) {
-    setFindings((prev) => mergeFindings(prev, [savedFinding]));
+    setFindings((prev) => sortFindings(mergeFindings(prev, [savedFinding])));
+    setWorkflowState((prev) => ({
+      ...prev,
+      findingHistory: [
+        ...prev.findingHistory,
+        {
+          title: savedFinding.title || "Auto-saved finding",
+          severity: savedFinding.severity || "Medium",
+          source: "ai_auto_saved",
+          createdAt: savedFinding.created_at || new Date().toISOString(),
+        },
+      ].slice(-12),
+    }));
     setFindingSuggestion(null);
     setMessage(`AI auto-saved finding: ${savedFinding.title}`);
   }
@@ -361,6 +546,13 @@ export function SecureStackProvider({ children }) {
     if (!labSteps?.length || summary.currentLabStepIndex >= labSteps.length) {
       return;
     }
+
+    setWorkflowState((prev) => ({
+      ...prev,
+      lastCommand: command?.trim() || prev.lastCommand,
+      lastCommandAt: prev.lastCommandAt || new Date().toISOString(),
+      lastFeedbackAt: new Date().toISOString(),
+    }));
 
     const activeStep = labSteps[summary.currentLabStepIndex];
     if ((activeStep?.step_type || "command") !== "command") {
@@ -427,6 +619,20 @@ export function SecureStackProvider({ children }) {
     }));
   }
 
+  function applyEvidenceFindingDraft() {
+    if (!workflow.evidenceContext?.hasEvidence) {
+      setMessage("Run a command first so the finding draft has evidence to use.");
+      return;
+    }
+
+    setFindingForm({
+      title: workflow.evidenceContext.draftTitle,
+      severity: "Medium",
+      description: workflow.evidenceContext.draftDescription,
+    });
+    setMessage("Evidence-aware finding draft applied.");
+  }
+
   async function saveFinding(event) {
     event.preventDefault();
 
@@ -448,21 +654,44 @@ export function SecureStackProvider({ children }) {
         session_id: sessionId,
         title: findingForm.title.trim(),
         severity: findingForm.severity,
-        description: findingForm.description.trim(),
+        source: "manual",
+        task_id: workflow.activeTask?.task_id || null,
+        task_label: workflow.evidenceContext.taskContext || null,
+        task_objective: workflow.evidenceContext.taskObjective || null,
+        evidence_command: workflow.evidenceContext.recentCommand || null,
+        evidence_snapshot: workflow.evidenceContext.evidence || null,
+        description: mergeFindingEvidenceContext(
+          findingForm.description.trim(),
+          workflow.evidenceContext
+        ),
       };
 
       const saved = await addFinding(payload);
 
       setFindings((prev) =>
-        mergeFindings(prev, [
-          saved?.id
-            ? saved
-            : {
-                id: Date.now(),
-                ...payload,
-              },
-        ])
+        sortFindings(
+          mergeFindings(prev, [
+            saved?.id
+              ? saved
+              : {
+                  id: Date.now(),
+                  ...payload,
+                },
+          ])
+        )
       );
+      setWorkflowState((prev) => ({
+        ...prev,
+        findingHistory: [
+          ...prev.findingHistory,
+          {
+            title: payload.title,
+            severity: payload.severity,
+            source: "manual",
+            createdAt: saved?.created_at || new Date().toISOString(),
+          },
+        ].slice(-12),
+      }));
 
       setFindingForm({
         title: "",
@@ -493,28 +722,52 @@ export function SecureStackProvider({ children }) {
         session_id: sessionId,
         title: findingSuggestion.title?.trim() || "Suggested Finding",
         severity: findingSuggestion.severity || "Medium",
-        description: [
-          findingSuggestion.description || "",
-          findingSuggestion.evidence
-            ? `Evidence:\n${findingSuggestion.evidence}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        source: "ai_suggestion",
+        task_id: workflow.activeTask?.task_id || null,
+        task_label: workflow.evidenceContext.taskContext || null,
+        task_objective: workflow.evidenceContext.taskObjective || null,
+        evidence_command: workflow.evidenceContext.recentCommand || null,
+        evidence_snapshot:
+          findingSuggestion.evidence || workflow.evidenceContext.evidence || null,
+        description: mergeFindingEvidenceContext(
+          [
+            findingSuggestion.description || "",
+            findingSuggestion.evidence
+              ? `Evidence:\n${findingSuggestion.evidence}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          workflow.evidenceContext
+        ),
       };
 
       const saved = await addFinding(payload);
 
       setFindings((prev) =>
-        mergeFindings(prev, [
-          saved?.id
-            ? saved
-            : {
-                id: Date.now(),
-                ...payload,
-              },
-        ])
+        sortFindings(
+          mergeFindings(prev, [
+            saved?.id
+              ? saved
+              : {
+                  id: Date.now(),
+                  ...payload,
+                },
+          ])
+        )
       );
+      setWorkflowState((prev) => ({
+        ...prev,
+        findingHistory: [
+          ...prev.findingHistory,
+          {
+            title: payload.title,
+            severity: payload.severity,
+            source: "ai_suggestion",
+            createdAt: saved?.created_at || new Date().toISOString(),
+          },
+        ].slice(-12),
+      }));
 
       setFindingSuggestion(null);
       setMessage("Suggested finding accepted and saved.");
@@ -542,10 +795,15 @@ export function SecureStackProvider({ children }) {
     try {
       const response = await getReport(sessionId);
       setReport(response);
+      setSessionRecord((prev) => response.session || prev);
 
       if (Array.isArray(response?.findings)) {
-        setFindings((prev) => mergeFindings(prev, response.findings));
+        setFindings((prev) => sortFindings(mergeFindings(prev, response.findings)));
       }
+      setWorkflowState((prev) => ({
+        ...prev,
+        reportGeneratedAt: new Date().toISOString(),
+      }));
 
       setMessage("Report generated successfully.");
       return response;
@@ -570,6 +828,7 @@ export function SecureStackProvider({ children }) {
     labCatalogLoading,
     labCatalogError,
     sessionId,
+    sessionRecord,
     report,
     message,
     sessionSyncing,
@@ -587,17 +846,21 @@ export function SecureStackProvider({ children }) {
     taskProgress,
     findingForm,
     summary,
+    workflow,
     selectLab,
     startNewSession,
     setSessionFromRoute,
     launchActiveLab,
     handleTerminalFeedback,
+    handleCommandSubmitted,
     clearFeedback,
     handleFindingSuggestion,
     handleAutoSavedFinding,
     handleCommandResult,
+    recordVisitedSection,
     completeBrowserStep,
     updateFindingForm,
+    applyEvidenceFindingDraft,
     saveFinding,
     acceptSuggestedFinding,
     dismissSuggestedFinding,

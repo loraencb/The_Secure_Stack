@@ -1,24 +1,36 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import Base, engine, ensure_task_completion_columns
-from app.routers import labs, sessions, findings, reports, ws_terminal, task_progress
+from fastapi.responses import JSONResponse
+from app.bootstrap import bootstrap_application
+from app.config import settings
+from app.logging_config import configure_logging
+from app.routers import (
+    auth,
+    labs,
+    sessions,
+    findings,
+    reports,
+    ws_terminal,
+    task_progress,
+)
 
+configure_logging()
+logger = logging.getLogger("securestack.api")
+bootstrap_application()
 app = FastAPI()
-
-Base.metadata.create_all(bind=engine)
-ensure_task_completion_columns()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(labs.router)
 app.include_router(sessions.router)
 app.include_router(findings.router)
@@ -35,3 +47,42 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning(
+        "validation_error path=%s errors=%s",
+        request.url.path,
+        exc.errors(),
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Invalid request payload",
+            "errors": exc.errors(),
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    logger.warning(
+        "http_error path=%s status_code=%s detail=%s",
+        request.url.path,
+        exc.status_code,
+        exc.detail,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("unhandled_error path=%s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )

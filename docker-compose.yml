@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-securestack}
+      POSTGRES_USER: ${POSTGRES_USER:-securestack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securestack}
+    volumes:
+      - securestack_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-securestack} -d ${POSTGRES_DB:-securestack}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      SECURESTACK_APP_ENV: ${SECURESTACK_APP_ENV:-production}
+      SECURESTACK_LOG_LEVEL: ${SECURESTACK_LOG_LEVEL:-INFO}
+      SECURESTACK_API_HOST: ${SECURESTACK_API_HOST:-0.0.0.0}
+      SECURESTACK_API_PORT: ${SECURESTACK_API_PORT:-8000}
+      SECURESTACK_API_WORKERS: ${SECURESTACK_API_WORKERS:-1}
+      SECURESTACK_CORS_ORIGINS: ${SECURESTACK_CORS_ORIGINS:-http://localhost:8080}
+      SECURESTACK_DATABASE_URL: ${SECURESTACK_DATABASE_URL:-postgresql+psycopg://securestack:securestack@postgres:5432/securestack}
+      SECURESTACK_DATABASE_CONNECT_RETRIES: ${SECURESTACK_DATABASE_CONNECT_RETRIES:-10}
+      SECURESTACK_DATABASE_CONNECT_RETRY_DELAY: ${SECURESTACK_DATABASE_CONNECT_RETRY_DELAY:-2}
+      SECURESTACK_AUTH_TOKEN_SECRET: ${SECURESTACK_AUTH_TOKEN_SECRET:-securestack-dev-secret}
+      SECURESTACK_AUTH_TOKEN_TTL_HOURS: ${SECURESTACK_AUTH_TOKEN_TTL_HOURS:-24}
+      SECURESTACK_PASSWORD_ITERATIONS: ${SECURESTACK_PASSWORD_ITERATIONS:-120000}
+      SECURESTACK_MIN_PASSWORD_LENGTH: ${SECURESTACK_MIN_PASSWORD_LENGTH:-8}
+      SECURESTACK_OLLAMA_URL: ${SECURESTACK_OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
+      SECURESTACK_OLLAMA_MODEL: ${SECURESTACK_OLLAMA_MODEL:-llama3}
+      SECURESTACK_OLLAMA_TIMEOUT_SECONDS: ${SECURESTACK_OLLAMA_TIMEOUT_SECONDS:-60}
+      SECURESTACK_DOCKER_HOST: ${SECURESTACK_DOCKER_HOST:-unix:///var/run/docker.sock}
+      SECURESTACK_DOCKER_CLI: ${SECURESTACK_DOCKER_CLI:-docker}
+      SECURESTACK_DOCKER_COMPOSE_COMMAND: ${SECURESTACK_DOCKER_COMPOSE_COMMAND:-docker compose}
+      SECURESTACK_CONTAINER_SHELL: ${SECURESTACK_CONTAINER_SHELL:-bash}
+      SECURESTACK_TARGET_READY_TIMEOUT_SECONDS: ${SECURESTACK_TARGET_READY_TIMEOUT_SECONDS:-60}
+      SECURESTACK_TARGET_PUBLIC_HOST: ${SECURESTACK_TARGET_PUBLIC_HOST:-localhost}
+      SECURESTACK_TARGET_PROBE_HOST: ${SECURESTACK_TARGET_PROBE_HOST:-host.docker.internal}
+      SECURESTACK_CONTAINER_MEMORY_LIMIT: ${SECURESTACK_CONTAINER_MEMORY_LIMIT:-512m}
+      SECURESTACK_CONTAINER_NANO_CPUS: ${SECURESTACK_CONTAINER_NANO_CPUS:-1000000000}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${SECURESTACK_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_WS_URL: ${VITE_WS_URL:-/ws}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${SECURESTACK_FRONTEND_PORT:-8080}:80"
+
+volumes:
+  securestack_postgres_data:

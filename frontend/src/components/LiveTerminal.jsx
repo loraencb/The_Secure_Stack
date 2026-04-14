@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
-import { WS_BASE_URL } from "../api/Client";
+import { buildWebSocketUrl, getAuthToken } from "../api/Client";
 
 const DEFAULT_SHELL_USER = "root";
 const DEFAULT_SHELL_PATH = "~/secure-stack-lab";
@@ -132,7 +132,12 @@ export default function LiveTerminal({
 
     termInstanceRef.current = term;
 
-    const socket = new WebSocket(`${WS_BASE_URL}/ws/terminal/${sessionId}`);
+    const authToken = getAuthToken();
+    const socketUrl = new URL(buildWebSocketUrl(`/terminal/${sessionId}`));
+    if (authToken) {
+      socketUrl.searchParams.set("token", authToken);
+    }
+    const socket = new WebSocket(socketUrl);
     socketRef.current = socket;
 
     let currentLine = "";

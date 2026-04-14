@@ -1,33 +1,38 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app import models, schemas
-from app.database import SessionLocal
+from app.dependencies import get_current_user, get_db
 from app.services.task_evaluator import evaluate_task_attempt
 
 router = APIRouter(prefix="/task-progress", tags=["Task Progress"])
+logger = logging.getLogger("securestack.task_progress")
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def get_session_or_404(db: Session, session_id: int):
-    session = db.query(models.Session).filter(models.Session.id == session_id).first()
+def get_session_or_404(db: Session, session_id: int, user_id: int):
+    session = (
+        db.query(models.Session)
+        .filter(
+            models.Session.id == session_id,
+            models.Session.user_id == user_id,
+        )
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
 
 @router.get("/session/{session_id}", response_model=list[schemas.TaskProgressResponse])
-def get_task_progress(session_id: int, db: Session = Depends(get_db)):
-    get_session_or_404(db, session_id)
+def get_task_progress(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    get_session_or_404(db, session_id, current_user.id)
 
     return (
         db.query(models.TaskCompletion)
@@ -41,8 +46,9 @@ def get_task_progress(session_id: int, db: Session = Depends(get_db)):
 def mark_task_complete(
     payload: schemas.TaskProgressComplete,
     db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
-    get_session_or_404(db, payload.session_id)
+    get_session_or_404(db, payload.session_id, current_user.id)
 
     evaluation = None
     if payload.completion_method == "command_match":
@@ -123,6 +129,13 @@ def mark_task_complete(
 
     db.commit()
     db.refresh(completion)
+    logger.info(
+        "task_progress_saved user_id=%s session_id=%s task_id=%s status=%s",
+        current_user.id,
+        payload.session_id,
+        payload.task_id,
+        completion.status,
+    )
     return completion
 
 
@@ -136,8 +149,9 @@ def attach_task_evidence(
     task_id: str,
     payload: schemas.TaskProgressEvidenceUpdate,
     db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
-    get_session_or_404(db, session_id)
+    get_session_or_404(db, session_id, current_user.id)
 
     completion = (
         db.query(models.TaskCompletion)
@@ -171,4 +185,10 @@ def attach_task_evidence(
 
     db.commit()
     db.refresh(completion)
+    logger.info(
+        "task_evidence_updated user_id=%s session_id=%s task_id=%s",
+        current_user.id,
+        session_id,
+        task_id,
+    )
     return completion

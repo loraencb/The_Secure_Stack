@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.orm import Session
 
+from app.dependencies import authenticate_websocket_user
 from app.database import SessionLocal
 from app import models
 from app.services.terminal_manager import (
@@ -32,7 +33,7 @@ async def safe_send_json(websocket: WebSocket, payload: dict) -> bool:
         return False
 
 
-def save_auto_finding(session_id: int, finding: dict):
+def save_auto_finding(session_id: int, user_id: int, finding: dict):
     db: Session = SessionLocal()
     try:
         title = (finding.get("title") or "AI Suggested Finding").strip()
@@ -48,6 +49,7 @@ def save_auto_finding(session_id: int, finding: dict):
             db.query(models.Finding)
             .filter(
                 models.Finding.session_id == session_id,
+                models.Finding.user_id == user_id,
                 models.Finding.title == title,
             )
             .first()
@@ -57,9 +59,12 @@ def save_auto_finding(session_id: int, finding: dict):
 
         new_finding = models.Finding(
             session_id=session_id,
+            user_id=user_id,
             title=title,
             severity=severity,
             description=full_description,
+            source="ai_auto_saved",
+            evidence_snapshot=evidence or None,
         )
         db.add(new_finding)
         db.commit()
@@ -105,8 +110,18 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
     db: Session = SessionLocal()
 
     try:
+        current_user = authenticate_websocket_user(websocket, db)
+        if not current_user:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
         session = (
-            db.query(models.Session).filter(models.Session.id == session_id).first()
+            db.query(models.Session)
+            .filter(
+                models.Session.id == session_id,
+                models.Session.user_id == current_user.id,
+            )
+            .first()
         )
         if not session:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -231,7 +246,11 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                 finding = feedback.get("finding")
 
                 if finding_detected and finding and finding_confidence == "high":
-                    saved_finding, was_created = save_auto_finding(session_id, finding)
+                    saved_finding, was_created = save_auto_finding(
+                        session_id,
+                        current_user.id,
+                        finding,
+                    )
 
                     if was_created:
                         if not await safe_send_json(
@@ -244,6 +263,11 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                                     "title": saved_finding.title,
                                     "severity": saved_finding.severity,
                                     "description": saved_finding.description,
+                                    "source": saved_finding.source,
+                                    "evidence_snapshot": saved_finding.evidence_snapshot,
+                                    "created_at": saved_finding.created_at.isoformat()
+                                    if saved_finding.created_at
+                                    else None,
                                 },
                             },
                         ):

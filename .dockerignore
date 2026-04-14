@@ -1,0 +1,15 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.db
+**/*.db-journal
+**/*.log
+backend/.venv
+backend/.runtime
+frontend/node_modules
+frontend/dist
+frontend/.vite
+securestack_validation.db
+securestack_validation.db-journal

@@ -1,7 +1,10 @@
 import json
+import logging
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+from app.config import settings
+
+logger = logging.getLogger("securestack.ai")
 
 
 def build_prompt(findings):
@@ -71,14 +74,14 @@ def generate_summary(findings):
 
     try:
         response = requests.post(
-            OLLAMA_URL,
+            settings.ollama_url,
             json={
-                "model": "llama3",
+                "model": settings.ollama_model,
                 "prompt": prompt,
                 "stream": False,
                 "options": {"temperature": 0},
             },
-            timeout=60,
+            timeout=settings.ollama_timeout_seconds,
         )
 
         response.raise_for_status()
@@ -89,6 +92,7 @@ def generate_summary(findings):
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
+            logger.warning("ai_summary_malformed_output findings=%s", len(findings))
             return {
                 "risk_level": "Medium",
                 "key_issues": [finding.title for finding in findings[:3]],
@@ -99,6 +103,12 @@ def generate_summary(findings):
                 "summary": "The report generator returned malformed AI output, so a fallback summary was produced from the saved findings.",
             }
     except requests.RequestException:
+        logger.warning(
+            "ai_summary_unavailable findings=%s ollama_url=%s model=%s",
+            len(findings),
+            settings.ollama_url,
+            settings.ollama_model,
+        )
         highest = "Low"
         if any((finding.severity or "").lower() == "high" for finding in findings):
             highest = "High"

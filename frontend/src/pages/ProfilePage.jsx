@@ -1,20 +1,128 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { getSessionHistory } from "../api/Client";
 import { useSecureStack } from "../context/SecureStackContext";
-import { getEvidencePreview } from "../utils/session";
 import { buildSessionPath } from "../utils/routes";
+import { getEvidencePreview } from "../utils/session";
+
+function formatHistoryDate(value) {
+  if (!value) {
+    return "Unavailable";
+  }
+
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return "Unavailable";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(parsed));
+}
+
+function getHistoryTone(status) {
+  switch (status) {
+    case "Report generated":
+      return "success";
+    case "Evidence captured":
+      return "info";
+    case "Environment launched":
+      return "sky";
+    case "Completed":
+      return "muted";
+    default:
+      return "warning";
+  }
+}
+
+function getHistoryOpenLabel(entry, activeSessionId) {
+  return entry.id === activeSessionId ? "Resume Session" : "Open Session";
+}
+
+function getHistoryTargetSection(entry) {
+  if (entry.report_generated_at) {
+    return "reports";
+  }
+
+  if (entry.environment_launched_at) {
+    return "overview";
+  }
+
+  return "overview";
+}
 
 export default function ProfilePage() {
-  const { activeLabDefinition, sessionId, summary, report } = useSecureStack();
+  const {
+    activeLabDefinition,
+    sessionId,
+    sessionRecord,
+    summary,
+    report,
+    workflow,
+  } = useSecureStack();
+  const [sessionHistory, setSessionHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHistory() {
+      setHistoryLoading(true);
+      setHistoryError("");
+
+      try {
+        const history = await getSessionHistory();
+        if (!cancelled) {
+          setSessionHistory(Array.isArray(history) ? history : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Session history load error:", error);
+          setHistoryError(
+            error.message || "Failed to load previous investigations."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false);
+        }
+      }
+    }
+
+    loadHistory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    sessionId,
+    workflow.environmentLaunched,
+    workflow.reportGenerated,
+    summary.sortedFindings.length,
+  ]);
+
+  const currentHistoryEntry = useMemo(
+    () => sessionHistory.find((entry) => entry.id === sessionId) || null,
+    [sessionHistory, sessionId]
+  );
+  const priorSessions = useMemo(
+    () => sessionHistory.filter((entry) => entry.id !== sessionId),
+    [sessionHistory, sessionId]
+  );
 
   return (
     <div className="page-stack">
       <section className="page-header page-header--single">
         <div>
           <span className="eyebrow">Profile And Progress</span>
-          <h1>Track the active lab, saved evidence, and session momentum.</h1>
+          <h1>Track active work and reopen durable past investigations.</h1>
           <p>
-            This page gives learners a clean snapshot of the current session,
-            guided task progress, and the strongest evidence captured so far.
+            This page keeps the current session visible while also surfacing
+            earlier labs the platform remembers from the backend.
           </p>
           <div className="page-header__actions">
             {sessionId ? (
@@ -43,8 +151,8 @@ export default function ProfilePage() {
           <strong>{activeLabDefinition?.name || "No lab selected"}</strong>
         </article>
         <article className="surface-card stat-card stat-card--large">
-          <span>Completion</span>
-          <strong>{summary.progressPercent}%</strong>
+          <span>Prior investigations</span>
+          <strong>{priorSessions.length}</strong>
         </article>
       </section>
 
@@ -79,12 +187,29 @@ export default function ProfilePage() {
 
             <div className="detail-box">
               <span className="detail-label">Recommended next action</span>
-              <p>{summary.recommendedNextAction}</p>
+              <p>
+                <strong>{workflow.nextRecommendation.label}:</strong>{" "}
+                {workflow.nextRecommendation.description}
+              </p>
             </div>
 
             <div className="detail-box">
               <span className="detail-label">Current task</span>
               <p>{summary.activeLabStep?.title || "All guided tasks completed."}</p>
+            </div>
+
+            <div className="detail-box">
+              <span className="detail-label">Backend session state</span>
+              <p>
+                {currentHistoryEntry?.history_status ||
+                  (sessionRecord?.report_generated_at
+                    ? "Report generated"
+                    : sessionRecord?.environment_launched_at
+                    ? "Environment launched"
+                    : sessionId
+                    ? "In progress"
+                    : "No active session")}
+              </p>
             </div>
           </section>
 
@@ -137,6 +262,15 @@ export default function ProfilePage() {
                   <p>{report.analysis?.summary || "No summary available."}</p>
                 </div>
               </div>
+            ) : workflow.reportGenerated ? (
+              <div className="empty-card">
+                <strong>Report generated</strong>
+                <p>
+                  A report has already been generated for this session. Open
+                  the session reports view to refresh or review the latest
+                  analysis.
+                </p>
+              </div>
             ) : (
               <div className="empty-card">
                 <strong>No report yet</strong>
@@ -152,18 +286,80 @@ export default function ProfilePage() {
             <div className="section-heading">
               <div>
                 <span className="eyebrow">History</span>
-                <h2>Session Archive</h2>
+                <h2>Investigation Archive</h2>
               </div>
             </div>
 
-            <div className="empty-card">
-              <strong>Archive not available yet</strong>
-              <p>
-                This view currently focuses on the active session. Completed
-                session history will appear here once archived sessions are
-                available.
-              </p>
-            </div>
+            {historyLoading ? (
+              <div className="empty-card">
+                <strong>Loading session history</strong>
+                <p>The backend is preparing durable investigation summaries.</p>
+              </div>
+            ) : historyError ? (
+              <div className="empty-card">
+                <strong>History unavailable</strong>
+                <p>{historyError}</p>
+              </div>
+            ) : priorSessions.length ? (
+              <div className="stack-list history-list">
+                {priorSessions.map((entry) => (
+                  <article
+                    key={entry.id}
+                    className="stack-list__item history-list__item"
+                  >
+                    <div className="section-heading">
+                      <div>
+                        <h3>{entry.lab_name || entry.lab_id || "Legacy session"}</h3>
+                        <p>Session #{entry.id}</p>
+                      </div>
+                      <span className={`badge badge--${getHistoryTone(entry.history_status)}`}>
+                        {entry.history_status}
+                      </span>
+                    </div>
+
+                    <div className="content-stack">
+                      <div className="detail-box detail-box--tertiary">
+                        <span className="detail-label">Started</span>
+                        <p>{formatHistoryDate(entry.start_time)}</p>
+                      </div>
+                      <div className="detail-box detail-box--tertiary">
+                        <span className="detail-label">Findings</span>
+                        <p>{entry.findings_count} saved</p>
+                      </div>
+                      <div className="detail-box detail-box--tertiary">
+                        <span className="detail-label">Runtime</span>
+                        <p>
+                          {entry.environment_launched_at
+                            ? `${entry.attacker_container || "Attacker"} -> ${
+                                entry.target_container || "Target"
+                              }`
+                            : "Environment was not launched or older metadata is unavailable."}
+                        </p>
+                      </div>
+                      <div className="inline-actions">
+                        <Link
+                          className="button button--secondary"
+                          to={buildSessionPath(
+                            entry.id,
+                            getHistoryTargetSection(entry)
+                          )}
+                        >
+                          {getHistoryOpenLabel(entry, sessionId)}
+                        </Link>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-card">
+                <strong>No prior investigations yet</strong>
+                <p>
+                  Previous sessions will appear here once the platform has more
+                  than the current live investigation to remember.
+                </p>
+              </div>
+            )}
           </section>
         </div>
       </div>

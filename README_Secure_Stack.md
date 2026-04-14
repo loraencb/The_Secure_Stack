@@ -89,7 +89,7 @@ The platform simulates real-world pentesting workflows while helping users learn
 ---
 
 ## 🏗️ Architecture
-
+```text
 Frontend (React)
 ↓
 WebSocket + REST API
@@ -104,7 +104,7 @@ Docker Engine
 ├── Attacker Container
 ├── Target Container
 └── Lab Network
-
+```
 ---
 
 ## 🛠️ Tech Stack
@@ -189,9 +189,9 @@ Click **Launch Juice Shop Lab**
 
 ### 3. Follow Guided Steps
 
-ping -c 3 target
-nmap -sV target
-curl http://target:3000
+- ping -c 3 target
+- nmap -sV target
+- curl http://target:3000
 
 ---
 
