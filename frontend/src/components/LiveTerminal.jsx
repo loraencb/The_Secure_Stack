@@ -9,15 +9,19 @@ export default function LiveTerminal({
   onFindingSuggestion,
   onFindingAutoSaved,
   onCommandSubmitted,
+  onCommandResult,
 }) {
   const terminalRef = useRef(null);
   const termInstanceRef = useRef(null);
   const socketRef = useRef(null);
+  const activeCommandRef = useRef(null);
+  const commandOutputRef = useRef("");
 
   const onFeedbackRef = useRef(onFeedback);
   const onFindingSuggestionRef = useRef(onFindingSuggestion);
   const onFindingAutoSavedRef = useRef(onFindingAutoSaved);
   const onCommandSubmittedRef = useRef(onCommandSubmitted);
+  const onCommandResultRef = useRef(onCommandResult);
 
   useEffect(() => {
     onFeedbackRef.current = onFeedback;
@@ -34,6 +38,10 @@ export default function LiveTerminal({
   useEffect(() => {
     onCommandSubmittedRef.current = onCommandSubmitted;
   }, [onCommandSubmitted]);
+
+  useEffect(() => {
+    onCommandResultRef.current = onCommandResult;
+  }, [onCommandResult]);
 
   useEffect(() => {
     if (!sessionId || !terminalRef.current) return;
@@ -74,9 +82,23 @@ export default function LiveTerminal({
         const message = JSON.parse(event.data);
 
         if (message.type === "terminal_output") {
+          if (activeCommandRef.current) {
+            commandOutputRef.current += message.data;
+          }
           term.write(message.data);
         } else if (message.type === "ai_feedback" && onFeedbackRef.current) {
           onFeedbackRef.current(message.data);
+
+          if (activeCommandRef.current && onCommandResultRef.current) {
+            onCommandResultRef.current({
+              command: activeCommandRef.current.command,
+              output: commandOutputRef.current,
+              feedback: message.data,
+            });
+          }
+
+          activeCommandRef.current = null;
+          commandOutputRef.current = "";
         } else if (
           message.type === "finding_suggestion" &&
           onFindingSuggestionRef.current
@@ -117,6 +139,9 @@ export default function LiveTerminal({
         if (submitted && onCommandSubmittedRef.current) {
           onCommandSubmittedRef.current(submitted);
         }
+
+        activeCommandRef.current = submitted ? { command: submitted } : null;
+        commandOutputRef.current = "";
 
         socket.send(currentLine);
         term.write("\r\n");

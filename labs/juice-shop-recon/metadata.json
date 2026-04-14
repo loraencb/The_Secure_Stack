@@ -1,0 +1,138 @@
+{
+  "lab_id": "juice-shop-recon",
+  "name": "Juice Shop Recon Lab",
+  "description": "Guided reconnaissance against an exposed OWASP Juice Shop instance from an isolated attacker container.",
+  "difficulty": "Beginner",
+  "category": "Web Reconnaissance",
+  "estimated_duration_minutes": 25,
+  "learning_objectives": [
+    "Verify network connectivity between the attacker and the target host.",
+    "Identify exposed ports and services with a version detection scan.",
+    "Validate that the reachable service is a web application worth deeper testing.",
+    "Document evidence that supports a basic recon finding."
+  ],
+  "prerequisites": [
+    "Basic Linux terminal navigation",
+    "Understanding of ICMP, TCP ports, and HTTP",
+    "Awareness that the lab is for authorized educational use only"
+  ],
+  "required_tools": [
+    "bash",
+    "ping",
+    "nmap",
+    "curl"
+  ],
+  "success_criteria": [
+    "The learner confirms target reachability from the attacker container.",
+    "The learner identifies that port 3000 is open on the target.",
+    "The learner captures evidence that the exposed service is the Juice Shop web application."
+  ],
+  "manuals": {
+    "student": "student_manual.md",
+    "instructor": "instructor_guide.md"
+  },
+  "runtime": {
+    "attacker": {
+      "image": "securestack-attacker:latest",
+      "container_name": "attacker-{session_id}"
+    },
+    "target": {
+      "image": "bkimminich/juice-shop",
+      "container_name": "target-{session_id}",
+      "ports": {
+        "3000/tcp": null
+      },
+      "app_port": 3000,
+      "alias": "target"
+    },
+    "network_name": "lab-net-{session_id}"
+  },
+  "tasks": [
+    {
+      "task_id": "verify-connectivity",
+      "title": "Verify connectivity",
+      "step_type": "command",
+      "objective": "Confirm that the attacker container can resolve and reach the target host.",
+      "instruction": "Confirm the attacker can reach the target container.",
+      "command_hint": "ping -c 3 target",
+      "expected_evidence": [
+        "icmp_seq",
+        "0% packet loss"
+      ],
+      "allowed_completion_methods": [
+        "command_match"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Use the `target` hostname from the attacker shell.",
+      "remediation_text": "If ping fails, verify that the lab launched successfully and the target alias is resolvable on the isolated network.",
+      "success_criteria": [
+        "The target responds to ICMP requests from the attacker container."
+      ]
+    },
+    {
+      "task_id": "identify-open-services",
+      "title": "Identify open services",
+      "step_type": "command",
+      "objective": "Enumerate exposed services and capture evidence of the reachable service.",
+      "instruction": "Scan the target to discover open ports and services.",
+      "command_hint": "nmap -sV target",
+      "expected_evidence": [
+        "3000/tcp open",
+        "service fingerprint"
+      ],
+      "allowed_completion_methods": [
+        "command_match",
+        "evidence_match"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Use version detection so the scan output is useful for reporting.",
+      "remediation_text": "If the scan does not show port 3000, confirm the target container is running and wait for the service to finish booting before rescanning.",
+      "success_criteria": [
+        "Port 3000 is identified as open on the target."
+      ]
+    },
+    {
+      "task_id": "inspect-web-application",
+      "title": "Inspect the web application",
+      "step_type": "command",
+      "objective": "Validate that the exposed service is a reachable web application.",
+      "instruction": "Fetch the application response from the target.",
+      "command_hint": "curl http://target:3000",
+      "expected_evidence": [
+        "HTTP/1.1 200 OK",
+        "OWASP Juice Shop"
+      ],
+      "allowed_completion_methods": [
+        "command_match",
+        "evidence_match"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Capture enough of the response to prove what application is listening on port 3000.",
+      "remediation_text": "If curl does not return the app, confirm the service is up and revisit the nmap output before trying again.",
+      "success_criteria": [
+        "The learner captures HTML or HTTP evidence that identifies the Juice Shop app."
+      ]
+    },
+    {
+      "task_id": "open-browser-view",
+      "title": "Open the application",
+      "step_type": "browser",
+      "objective": "Confirm the learner can reach the exposed application in a browser.",
+      "instruction": "Open the target in your browser.",
+      "command_hint": "http://localhost:{target_port}",
+      "expected_evidence": [
+        "Juice Shop UI loads in the browser"
+      ],
+      "allowed_completion_methods": [
+        "manual_confirmation"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Use the browser URL returned by the lab launcher.",
+      "remediation_text": "If the browser does not load, confirm the launcher returned a valid host port and that the target container is still running.",
+      "success_criteria": [
+        "The learner manually confirms that the Juice Shop UI is reachable."
+      ],
+      "manual_confirmation_label": "Mark Browser Step Complete"
+    }
+  ]
+}

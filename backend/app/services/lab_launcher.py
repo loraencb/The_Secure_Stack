@@ -70,7 +70,9 @@ def launch_lab(session_id: int, lab_id: str):
 
     attacker_name = lab["attacker"]["container_name"].format(session_id=session_id)
     target_name = lab["target"]["container_name"].format(session_id=session_id)
-    network_name = f"lab-net-{session_id}"
+    network_name = lab.get("network_name", "lab-net-{session_id}").format(
+        session_id=session_id
+    )
 
     safe_remove_container(attacker_name)
     safe_remove_container(target_name)
@@ -92,14 +94,16 @@ def launch_lab(session_id: int, lab_id: str):
         target.start()
         target.reload()
 
-        attacker = client.containers.run(
+        attacker = client.containers.create(
             lab["attacker"]["image"],
             name=attacker_name,
             detach=True,
             tty=True,
             stdin_open=True,
-            network=network.name,
         )
+        network.connect(attacker)
+        attacker.start()
+        attacker.reload()
 
         target.reload()
         app_port = lab["target"].get("app_port", 3000)
@@ -120,18 +124,30 @@ def launch_lab(session_id: int, lab_id: str):
         return {
             "lab_id": lab_id,
             "lab_name": lab["name"],
+            "description": lab.get("description"),
+            "difficulty": lab.get("difficulty"),
+            "category": lab.get("category"),
+            "estimated_duration_minutes": lab.get("estimated_duration_minutes"),
+            "learning_objectives": lab.get("learning_objectives", []),
+            "prerequisites": lab.get("prerequisites", []),
+            "required_tools": lab.get("required_tools", []),
+            "success_criteria": lab.get("success_criteria", []),
             "attacker_container": attacker.name,
             "target_container": target.name,
             "network_name": network.name,
             "target_alias": lab["target"]["alias"],
             "browser_url": browser_url,
+            "student_manual_path": lab.get("student_manual_path"),
+            "instructor_guide_path": lab.get("instructor_guide_path"),
             "steps": steps,
         }
 
-    except Exception:
+    except Exception as exc:
         if attacker:
             safe_remove_container(attacker_name)
         if target:
             safe_remove_container(target_name)
         safe_remove_network(network_name)
-        raise
+        raise RuntimeError(
+            f"Failed to launch lab '{lab_id}' for session {session_id}: {exc}"
+        ) from exc

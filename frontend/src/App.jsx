@@ -1,6 +1,19 @@
-import { useState, useCallback } from "react";
-import { startSession, launchLab, addFinding, getReport } from "./api/Client";
+import { useEffect, useState, useCallback } from "react";
+import {
+  startSession,
+  launchLab,
+  getLabDefinition,
+  getTaskProgress,
+  completeTaskProgress,
+  addFinding,
+  getFindings,
+  getReport,
+} from "./api/Client";
 import LiveTerminal from "./components/LiveTerminal";
+
+const LAB_ID = "juice-shop-recon";
+const SESSION_LAB_NAME = "juice-shop";
+const SESSION_STORAGE_KEY = "securestack_active_session_id";
 
 function mergeFindings(existingFindings, incomingFindings) {
   const merged = [...existingFindings];
@@ -27,8 +40,93 @@ function mergeFindings(existingFindings, incomingFindings) {
   return merged;
 }
 
+function mergeLabSteps(definitionTasks = [], runtimeSteps = []) {
+  if (!runtimeSteps.length) return definitionTasks;
+
+  return runtimeSteps.map((step, index) => ({
+    ...(definitionTasks[index] || {}),
+    ...step,
+  }));
+}
+
+function getStoredSessionId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const stored = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!stored) return null;
+
+  const parsed = Number(stored);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function buildTaskProgressMap(records = []) {
+  return records.reduce((accumulator, record) => {
+    if (record?.task_id) {
+      accumulator[record.task_id] = record;
+    }
+    return accumulator;
+  }, {});
+}
+
+function getCompletedStepIndexes(steps = [], taskProgress = {}) {
+  return steps.reduce((completed, step, index) => {
+    if (taskProgress[step.task_id]?.status === "completed") {
+      completed.push(index);
+    }
+
+    return completed;
+  }, []);
+}
+
+function getCurrentLabStepIndex(steps = [], taskProgress = {}) {
+  if (!steps.length) return 0;
+
+  const nextPendingIndex = steps.findIndex(
+    (step) => taskProgress[step.task_id]?.status !== "completed"
+  );
+
+  return nextPendingIndex === -1 ? steps.length : nextPendingIndex;
+}
+
+function getEvidencePreview(progressRecord) {
+  if (!progressRecord) return "No saved evidence.";
+
+  if (progressRecord.evidence_command) {
+    return progressRecord.evidence_command;
+  }
+
+  if (progressRecord.evidence_notes) {
+    return progressRecord.evidence_notes;
+  }
+
+  return "Evidence saved without a command.";
+}
+
+function getRecommendedNextAction(activeStep, activeTaskProgress) {
+  if (!activeStep) {
+    return "Review findings and generate the session report.";
+  }
+
+  if (activeStep.step_type === "browser") {
+    return activeStep.manual_confirmation_label || activeStep.instruction;
+  }
+
+  if (activeTaskProgress?.status === "off_track") {
+    return activeStep.remediation_text || activeStep.command_hint || activeStep.instruction;
+  }
+
+  if (activeTaskProgress?.status === "attempted") {
+    return activeStep.remediation_text || activeStep.command_hint || activeStep.instruction;
+  }
+
+  return activeStep.command_hint || activeStep.instruction;
+}
+
 export default function App() {
-  const [sessionId, setSessionId] = useState(null);
+  const [labDefinition, setLabDefinition] = useState(null);
+  const [sessionId, setSessionId] = useState(() => getStoredSessionId());
   const [report, setReport] = useState(null);
   const [message, setMessage] = useState("");
   const [terminalFeedback, setTerminalFeedback] = useState(null);
@@ -41,29 +139,103 @@ export default function App() {
   const [acceptingSuggestion, setAcceptingSuggestion] = useState(false);
   const [labSteps, setLabSteps] = useState(null);
   const [launchingLab, setLaunchingLab] = useState(false);
-  const [currentLabStep, setCurrentLabStep] = useState(0);
-  const [completedSteps, setCompletedSteps] = useState([]);
+  const [taskProgress, setTaskProgress] = useState({});
   const [findingForm, setFindingForm] = useState({
     title: "",
     severity: "Medium",
     description: "",
   });
 
+  const loadLabDefinition = useCallback(async () => {
+    const definition = await getLabDefinition(LAB_ID);
+    setLabDefinition(definition);
+    setLabSteps((prev) => mergeLabSteps(definition.tasks || [], prev || []));
+    return definition;
+  }, []);
+
+  const syncTaskProgress = useCallback(async (activeSessionId) => {
+    if (!activeSessionId) {
+      setTaskProgress({});
+      return {};
+    }
+
+    const records = await getTaskProgress(activeSessionId);
+    const progressMap = buildTaskProgressMap(records);
+    setTaskProgress(progressMap);
+    return progressMap;
+  }, []);
+
+  const syncFindings = useCallback(async (activeSessionId) => {
+    if (!activeSessionId) {
+      setFindings([]);
+      return [];
+    }
+
+    const records = await getFindings(activeSessionId);
+    const sortedRecords = [...records].sort((a, b) => (b.id || 0) - (a.id || 0));
+    setFindings(sortedRecords);
+    return sortedRecords;
+  }, []);
+
+  useEffect(() => {
+    loadLabDefinition().catch((error) => {
+      console.error("Lab definition load error:", error);
+    });
+  }, [loadLabDefinition]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (sessionId) {
+      window.localStorage.setItem(SESSION_STORAGE_KEY, String(sessionId));
+    } else {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setTaskProgress({});
+      setFindings([]);
+      return;
+    }
+
+    syncTaskProgress(sessionId).catch((error) => {
+      console.error("Task progress sync error:", error);
+
+      if (error.message === "Session not found") {
+        setSessionId(null);
+        setTaskProgress({});
+        setMessage("Previous session could not be restored.");
+      }
+    });
+
+    syncFindings(sessionId).catch((error) => {
+      console.error("Findings sync error:", error);
+    });
+  }, [sessionId, syncFindings, syncTaskProgress]);
+
   const handleStartSession = async () => {
     setStartingSession(true);
     setMessage("");
-
-    setCurrentLabStep(0);
-    setCompletedSteps([]);
     try {
-      const res = await startSession("juice-shop");
+      const definition =
+        (await loadLabDefinition().catch((error) => {
+          console.error("Lab definition refresh error:", error);
+          return labDefinition;
+        })) || labDefinition;
+
+      const res = await startSession(SESSION_LAB_NAME);
       setSessionId(res.id);
+      setTaskProgress({});
       setReport(null);
       setTerminalFeedback(null);
       setFindingSuggestion(null);
       setFindings([]);
       setLabInfo(null);
-      setLabSteps(null);
+      setLabSteps(definition?.tasks || []);
       setReport(null);
       setMessage(`Session ${res.id} started successfully.`);
     } catch (error) {
@@ -82,11 +254,10 @@ export default function App() {
 
     setLaunchingLab(true);
     setMessage("");
-    setCurrentLabStep(0);
-    setCompletedSteps([]);
     try {
-      const data = await launchLab(sessionId, "juice-shop-recon");
-      setLabSteps(data.steps || []);
+      const definition = labDefinition || (await loadLabDefinition());
+      const data = await launchLab(sessionId, LAB_ID);
+      setLabSteps(mergeLabSteps(definition?.tasks || [], data.steps || []));
       setLabInfo(data);
       setTerminalFeedback(null);
       setFindingSuggestion(null);
@@ -99,57 +270,55 @@ export default function App() {
     }
   };
   
-  const normalizeCommand = (command) => command.trim().toLowerCase();
+  const persistTaskCompletion = useCallback(
+    async ({
+      task,
+      status = "completed",
+      completionMethod,
+      evidenceCommand = "",
+      evidenceOutput = "",
+      evidenceNotes = "",
+      terminalFeedbackData = null,
+      aiFeedback = "",
+      aiStatus = "",
+      aiConfidence = "",
+      evidenceQuality = "",
+    }) => {
+      if (!sessionId || !task?.task_id) {
+        return null;
+      }
 
-  const getCurrentStep = useCallback(() => {
-    if (!labSteps?.length) return null;
-    return labSteps[currentLabStep] || null;
-  }, [labSteps, currentLabStep]);
+      const existingProgress = taskProgress[task.task_id];
+      if (existingProgress?.status === "completed") {
+        return existingProgress;
+      }
 
-  const completeCurrentStep = useCallback(
-    (successMessage) => {
-      const activeStep = getCurrentStep();
-      if (!activeStep) return;
-
-      setCompletedSteps((prev) => {
-        if (prev.includes(currentLabStep)) return prev;
-        return [...prev, currentLabStep];
+      const savedProgress = await completeTaskProgress({
+        session_id: sessionId,
+        lab_id: labDefinition?.lab_id || LAB_ID,
+        task_id: task.task_id,
+        status,
+        completion_method: completionMethod,
+        evidence_command: evidenceCommand || null,
+        evidence_output: evidenceOutput || null,
+        evidence_notes: evidenceNotes || null,
+        ai_status: aiStatus || null,
+        ai_feedback: aiFeedback || null,
+        ai_confidence: aiConfidence || null,
+        evidence_quality: evidenceQuality || null,
+        terminal_assessment: terminalFeedbackData?.assessment || null,
+        terminal_explanation: terminalFeedbackData?.explanation || null,
+        terminal_next_step: terminalFeedbackData?.next_step || null,
       });
 
-      setCurrentLabStep((prev) => Math.min(prev + 1, labSteps.length));
-      setMessage(successMessage);
+      setTaskProgress((prev) => ({
+        ...prev,
+        [savedProgress.task_id]: savedProgress,
+      }));
+
+      return savedProgress;
     },
-    [currentLabStep, getCurrentStep, labSteps]
-  );
-
-  const commandMatchesStep = useCallback((command, hint) => {
-    const c = normalizeCommand(command);
-    const h = normalizeCommand(hint);
-
-    if (h.includes("ping") && c.includes("ping")) return true;
-    if (h.includes("nmap") && c.includes("nmap")) return true;
-    if (h.includes("curl") && c.includes("curl")) return true;
-    if (h.startsWith("http://") || h.startsWith("https://")) return false;
-
-    return c === h;
-  }, []);
-
-  const handleCommandSubmitted = useCallback(
-    (command) => {
-      if (!labSteps || labSteps.length === 0) return;
-      if (currentLabStep >= labSteps.length) return;
-
-      const activeStep = labSteps[currentLabStep];
-      const expectedHint = activeStep?.command_hint || "";
-      const stepType = activeStep?.step_type || "command";
-
-      if (stepType !== "command") return;
-
-      if (commandMatchesStep(command, expectedHint)) {
-        completeCurrentStep(`Step ${currentLabStep + 1} completed.`);
-      }
-    },
-    [labSteps, currentLabStep, completeCurrentStep, commandMatchesStep]
+    [labDefinition, sessionId, taskProgress]
   );
 
   const handleAutoSavedFinding = useCallback((savedFinding) => {
@@ -308,17 +477,96 @@ export default function App() {
     setTerminalFeedback(null);
   };
 
-  const activeLabStep = getCurrentStep();
+  const completedSteps = getCompletedStepIndexes(labSteps || [], taskProgress);
+  const currentLabStep = getCurrentLabStepIndex(labSteps || [], taskProgress);
+  const activeLabStep =
+    labSteps && currentLabStep < labSteps.length ? labSteps[currentLabStep] : null;
+  const activeTaskProgress = activeLabStep
+    ? taskProgress[activeLabStep.task_id] || null
+    : null;
   const totalSteps = labSteps?.length || 0;
   const progressPercent =
     totalSteps > 0 ? Math.round((completedSteps.length / totalSteps) * 100) : 0;
+  const taskProgressRecords = Object.values(taskProgress);
+  const insufficientTasksCount = taskProgressRecords.filter(
+    (task) => task.status === "attempted"
+  ).length;
+  const offTrackAttemptsCount = taskProgressRecords.filter(
+    (task) => task.status === "off_track"
+  ).length;
+  const completedTaskRecords = (labSteps || [])
+    .map((step) => ({
+      step,
+      progress: taskProgress[step.task_id],
+    }))
+    .filter(({ progress }) => progress?.status === "completed");
+  const compactEvidenceSummary = completedTaskRecords.slice(0, 3);
+  const sortedFindings = [...findings].sort((a, b) => (b.id || 0) - (a.id || 0));
+  const mostRecentFinding = sortedFindings[0] || null;
+  const currentRecommendedNextAction = getRecommendedNextAction(
+    activeLabStep,
+    activeTaskProgress
+  );
 
-  const handleCompleteBrowserStep = () => {
+  const handleCommandResult = useCallback(
+    async ({ command, output, feedback }) => {
+      if (!labSteps?.length || currentLabStep >= labSteps.length) {
+        return;
+      }
+
+      const activeStep = labSteps[currentLabStep];
+      if ((activeStep?.step_type || "command") !== "command") {
+        return;
+      }
+
+      try {
+        const savedProgress = await persistTaskCompletion({
+          task: activeStep,
+          completionMethod: "command_match",
+          evidenceCommand: command,
+          evidenceOutput: output?.trim(),
+          evidenceNotes: "Captured from terminal command output.",
+          terminalFeedbackData: feedback,
+        });
+
+        if (savedProgress?.status === "completed") {
+          setMessage(`Step ${currentLabStep + 1} completed.`);
+        } else if (savedProgress?.status === "off_track") {
+          setMessage(`Step ${currentLabStep + 1} is still waiting for the expected command.`);
+        } else {
+          setMessage(`Step ${currentLabStep + 1} needs stronger evidence before it can be completed.`);
+        }
+      } catch (error) {
+        console.error("Task completion persistence error:", error);
+        setMessage(error.message || "Failed to save task progress.");
+      }
+    },
+    [currentLabStep, labSteps, persistTaskCompletion]
+  );
+
+  const handleCompleteBrowserStep = async () => {
     if (!activeLabStep || activeLabStep.step_type !== "browser") {
       return;
     }
 
-    completeCurrentStep(`Step ${currentLabStep + 1} completed.`);
+    try {
+      await persistTaskCompletion({
+        task: activeLabStep,
+        status: "completed",
+        completionMethod: "manual_confirmation",
+        evidenceNotes: labInfo?.browser_url
+          ? `Manually confirmed in browser at ${labInfo.browser_url}.`
+          : "Manually confirmed in the browser.",
+        aiFeedback: "This browser-only task was completed by manual confirmation.",
+        aiStatus: "manual_confirmation",
+        aiConfidence: "high",
+        evidenceQuality: "strong",
+      });
+      setMessage(`Step ${currentLabStep + 1} completed.`);
+    } catch (error) {
+      console.error("Browser step persistence error:", error);
+      setMessage(error.message || "Failed to save task progress.");
+    }
   };
 
   const riskColor = {
@@ -332,6 +580,32 @@ export default function App() {
     neutral: "#2563eb",
     risky: "#d97706",
     incorrect: "#dc2626",
+  };
+
+  const taskStatusMeta = {
+    completed: { label: "Completed", backgroundColor: "#dcfce7", color: "#166534" },
+    attempted: { label: "Needs Evidence", backgroundColor: "#fef3c7", color: "#92400e" },
+    off_track: { label: "Off Track", backgroundColor: "#fee2e2", color: "#991b1b" },
+    current: { label: "Current", backgroundColor: "#dbeafe", color: "#1d4ed8" },
+    pending: { label: "Pending", backgroundColor: "#e5e7eb", color: "#374151" },
+  };
+
+  const aiStatusMeta = {
+    successful: { label: "Successful", backgroundColor: "#dcfce7", color: "#166534" },
+    insufficient: { label: "Insufficient", backgroundColor: "#fef3c7", color: "#92400e" },
+    off_track: { label: "Off Track", backgroundColor: "#fee2e2", color: "#991b1b" },
+    manual_confirmation: {
+      label: "Manual",
+      backgroundColor: "#e0f2fe",
+      color: "#075985",
+    },
+  };
+
+  const evidenceQualityMeta = {
+    strong: { label: "Strong Evidence", backgroundColor: "#dcfce7", color: "#166534" },
+    partial: { label: "Partial Evidence", backgroundColor: "#fef3c7", color: "#92400e" },
+    weak: { label: "Weak Evidence", backgroundColor: "#fee2e2", color: "#991b1b" },
+    none: { label: "No Evidence", backgroundColor: "#e5e7eb", color: "#374151" },
   };
 
   const severityBadgeStyle = (severity) => ({
@@ -384,6 +658,99 @@ export default function App() {
         <div style={styles.leftColumn}>
           <section style={styles.card}>
             <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Learner Summary</h2>
+              <span style={styles.mutedText}>Current session progress</span>
+            </div>
+
+            <div style={styles.summaryHero}>
+              <div>
+                <span style={styles.label}>Lab Title</span>
+                <p style={styles.summaryTitle}>
+                  {labDefinition?.name ?? "Secure Stack Lab"}
+                </p>
+              </div>
+
+              <div style={styles.summaryProgressCircle}>
+                <span style={styles.summaryProgressValue}>{progressPercent}%</span>
+                <span style={styles.summaryProgressLabel}>complete</span>
+              </div>
+            </div>
+
+            <div style={styles.summaryGrid}>
+              <div style={styles.summaryStat}>
+                <span style={styles.metaLabel}>Total Tasks</span>
+                <span style={styles.summaryStatValue}>{totalSteps}</span>
+              </div>
+              <div style={styles.summaryStat}>
+                <span style={styles.metaLabel}>Completed</span>
+                <span style={styles.summaryStatValue}>{completedSteps.length}</span>
+              </div>
+              <div style={styles.summaryStat}>
+                <span style={styles.metaLabel}>Insufficient</span>
+                <span style={styles.summaryStatValue}>{insufficientTasksCount}</span>
+              </div>
+              <div style={styles.summaryStat}>
+                <span style={styles.metaLabel}>Off Track</span>
+                <span style={styles.summaryStatValue}>{offTrackAttemptsCount}</span>
+              </div>
+            </div>
+
+            <div style={styles.detailBlock}>
+              <span style={styles.label}>Current Task</span>
+              <p style={styles.paragraph}>
+                {activeLabStep?.title || "All guided tasks completed"}
+              </p>
+            </div>
+
+            <div style={styles.detailBlock}>
+              <span style={styles.label}>Recommended Next Action</span>
+              <p style={styles.paragraph}>{currentRecommendedNextAction}</p>
+            </div>
+
+            <div style={styles.detailBlock}>
+              <span style={styles.label}>Completed Evidence Summary</span>
+              {compactEvidenceSummary.length ? (
+                <div style={styles.summaryList}>
+                  {compactEvidenceSummary.map(({ step, progress }) => (
+                    <div key={step.task_id} style={styles.summaryListItem}>
+                      <strong style={styles.summaryListTitle}>{step.title}</strong>
+                      <p style={styles.summaryListText}>
+                        {getEvidencePreview(progress)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={styles.paragraph}>
+                  Completed-task evidence will appear here as the learner progresses.
+                </p>
+              )}
+            </div>
+
+            <div style={styles.detailBlock}>
+              <span style={styles.label}>Findings Summary</span>
+              <div style={styles.summaryGrid}>
+                <div style={styles.summaryStat}>
+                  <span style={styles.metaLabel}>Total Findings</span>
+                  <span style={styles.summaryStatValue}>{findings.length}</span>
+                </div>
+                <div style={styles.summaryStat}>
+                  <span style={styles.metaLabel}>Most Recent</span>
+                  <span style={styles.summaryFindingValue}>
+                    {mostRecentFinding?.title || "No findings yet"}
+                  </span>
+                  {mostRecentFinding ? (
+                    <span style={styles.summaryFindingBadge}>
+                      {mostRecentFinding.severity}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Session Status</h2>
               <span
                 style={{
@@ -399,7 +766,9 @@ export default function App() {
             <div style={styles.metaGrid}>
               <div style={styles.metaItem}>
                 <span style={styles.metaLabel}>Lab</span>
-                <span style={styles.metaValue}>juice-shop</span>
+                <span style={styles.metaValue}>
+                  {labDefinition?.name ?? SESSION_LAB_NAME}
+                </span>
               </div>
               <div style={styles.metaItem}>
                 <span style={styles.metaLabel}>Session ID</span>
@@ -420,6 +789,63 @@ export default function App() {
 
           <section style={styles.card}>
             <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>
+                {labDefinition?.name ?? "Lab Module"}
+              </h2>
+              <span style={styles.mutedText}>
+                {labDefinition?.difficulty ?? "Training"}{" "}
+                {labDefinition?.category ? `· ${labDefinition.category}` : ""}
+              </span>
+            </div>
+
+            {labDefinition ? (
+              <div style={styles.feedbackStack}>
+                <p style={styles.paragraph}>
+                  {labDefinition.description || "No lab description available."}
+                </p>
+
+                {labDefinition.learning_objectives?.length ? (
+                  <div>
+                    <span style={styles.label}>Learning Objectives</span>
+                    <ul style={styles.list}>
+                      {labDefinition.learning_objectives.map((objective, index) => (
+                        <li key={index}>{objective}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {labDefinition.prerequisites?.length ? (
+                  <div>
+                    <span style={styles.label}>Prerequisites</span>
+                    <ul style={styles.list}>
+                      {labDefinition.prerequisites.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {labDefinition.success_criteria?.length ? (
+                  <div>
+                    <span style={styles.label}>Success Criteria</span>
+                    <ul style={styles.list}>
+                      {labDefinition.success_criteria.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div style={styles.emptyState}>
+                Loading lab module definition.
+              </div>
+            )}
+          </section>
+
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Live Terminal</h2>
               <span style={styles.mutedText}>Linux container shell</span>
             </div>
@@ -431,11 +857,11 @@ export default function App() {
                 onFeedback={handleTerminalFeedback}
                 onFindingSuggestion={handleFindingSuggestion}
                 onFindingAutoSaved={handleAutoSavedFinding}
-                onCommandSubmitted={handleCommandSubmitted}
+                onCommandResult={handleCommandResult}
               />
             ) : (
               <div style={styles.emptyState}>
-                Launch a lab to open the terminal.
+                Launch the lab to open the terminal and begin the guided tasks.
               </div>
             )}
           </section>
@@ -518,7 +944,9 @@ export default function App() {
               onClick={handleLaunchLab}
               disabled={!sessionId || launchingLab}
             >
-              {launchingLab ? "Launching..." : "Launch Juice Shop Lab"}
+              {launchingLab
+                ? "Launching..."
+                : `Launch ${labDefinition?.name ?? "Juice Shop Lab"}`}
             </button>
 
             {labInfo ? (
@@ -543,7 +971,11 @@ export default function App() {
             <section style={styles.card}>
               <div style={styles.cardHeader}>
                 <h2 style={styles.cardTitle}>Lab Guide</h2>
-                <span style={styles.mutedText}>Step-by-step instructions</span>
+                <span style={styles.mutedText}>
+                  {labDefinition?.estimated_duration_minutes
+                    ? `${labDefinition.estimated_duration_minutes} min estimate`
+                    : "Step-by-step instructions"}
+                </span>
               </div>
 
               <div style={styles.progressTrack}>
@@ -562,11 +994,41 @@ export default function App() {
                 </p>
               )}
 
+              {activeLabStep && activeTaskProgress?.ai_feedback ? (
+                <div style={styles.activeTaskFeedbackBox}>
+                  <span style={styles.label}>Active Task Feedback</span>
+                  <p style={styles.paragraph}>{activeTaskProgress.ai_feedback}</p>
+                  {activeTaskProgress.evidence_quality ? (
+                    <p style={styles.paragraph}>
+                      <strong>Evidence Quality:</strong>{" "}
+                      {activeTaskProgress.evidence_quality}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div style={styles.feedbackStack}>
                 {labSteps.map((step, i) => {
+                  const stepProgress = taskProgress[step.task_id];
                   const isCompleted = completedSteps.includes(i);
                   const isActive = i === currentLabStep;
                   const isLocked = i > currentLabStep;
+                  const displayStatus = isCompleted
+                    ? "completed"
+                    : stepProgress?.status === "off_track"
+                    ? "off_track"
+                    : stepProgress?.status === "attempted"
+                    ? "attempted"
+                    : isActive
+                    ? "current"
+                    : "pending";
+                  const statusMeta = taskStatusMeta[displayStatus];
+                  const stepAiMeta = stepProgress?.ai_status
+                    ? aiStatusMeta[stepProgress.ai_status]
+                    : null;
+                  const stepEvidenceMeta = stepProgress?.evidence_quality
+                    ? evidenceQualityMeta[stepProgress.evidence_quality]
+                    : null;
 
                   return (
                     <div
@@ -594,25 +1056,91 @@ export default function App() {
                         <span
                           style={{
                             ...styles.statusBadge,
-                            backgroundColor: isCompleted
-                              ? "#dcfce7"
-                              : isActive
-                              ? "#dbeafe"
-                              : "#e5e7eb",
-                            color: isCompleted
-                              ? "#166534"
-                              : isActive
-                              ? "#1d4ed8"
-                              : "#374151",
+                            backgroundColor: statusMeta.backgroundColor,
+                            color: statusMeta.color,
                           }}
                         >
-                          {isCompleted ? "Completed" : isActive ? "Current" : "Pending"}
+                          {statusMeta.label}
                         </span>
                       </div>
 
                       <p style={styles.paragraph}>{step.instruction}</p>
 
                       <code style={styles.commandChip}>{step.command_hint}</code>
+
+                      {stepAiMeta ? (
+                        <div style={styles.detailBlock}>
+                          <span style={styles.label}>Task Evaluation</span>
+                          <div style={styles.badgeRow}>
+                            <span
+                              style={{
+                                ...styles.statusBadge,
+                                backgroundColor: stepAiMeta.backgroundColor,
+                                color: stepAiMeta.color,
+                              }}
+                            >
+                              {stepAiMeta.label}
+                            </span>
+
+                            {stepEvidenceMeta ? (
+                              <span
+                                style={{
+                                  ...styles.statusBadge,
+                                  backgroundColor: stepEvidenceMeta.backgroundColor,
+                                  color: stepEvidenceMeta.color,
+                                }}
+                              >
+                                {stepEvidenceMeta.label}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {stepProgress?.ai_feedback ? (
+                            <p style={styles.paragraph}>{stepProgress.ai_feedback}</p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {stepProgress?.evidence_command || stepProgress?.ai_confidence ? (
+                        <div style={styles.detailBlock}>
+                          <span style={styles.label}>Evidence Review</span>
+                          {stepProgress?.evidence_command ? (
+                            <p style={styles.paragraph}>
+                              <strong>Command:</strong> {stepProgress.evidence_command}
+                            </p>
+                          ) : null}
+                          {stepProgress?.ai_confidence ? (
+                            <p style={styles.paragraph}>
+                              <strong>Confidence:</strong> {stepProgress.ai_confidence}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {step.hint_text ? (
+                        <div style={styles.detailBlock}>
+                          <span style={styles.label}>Hint</span>
+                          <p style={styles.paragraph}>{step.hint_text}</p>
+                        </div>
+                      ) : null}
+
+                      {step.remediation_text ? (
+                        <div style={styles.detailBlock}>
+                          <span style={styles.label}>Remediation Guidance</span>
+                          <p style={styles.paragraph}>{step.remediation_text}</p>
+                        </div>
+                      ) : null}
+
+                      {step.success_criteria?.length ? (
+                        <div style={styles.detailBlock}>
+                          <span style={styles.label}>Success Criteria</span>
+                          <ul style={styles.list}>
+                            {step.success_criteria.map((criterion, index) => (
+                              <li key={index}>{criterion}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
 
                       {isActive && step.step_type === "browser" ? (
                         <div style={styles.stepActionRow}>
@@ -621,7 +1149,8 @@ export default function App() {
                             onClick={handleCompleteBrowserStep}
                             type="button"
                           >
-                            Mark Browser Step Complete
+                            {step.manual_confirmation_label ||
+                              "Mark Browser Step Complete"}
                           </button>
                         </div>
                       ) : null}
@@ -875,6 +1404,45 @@ const styles = {
     borderRadius: "12px",
     fontWeight: 600,
   },
+  summaryHero: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "16px",
+    flexWrap: "wrap",
+    marginBottom: "16px",
+  },
+  summaryTitle: {
+    margin: 0,
+    fontSize: "22px",
+    fontWeight: 700,
+    color: "#0f172a",
+  },
+  summaryProgressCircle: {
+    minWidth: "110px",
+    minHeight: "110px",
+    borderRadius: "999px",
+    border: "8px solid #dbeafe",
+    backgroundColor: "#eff6ff",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  summaryProgressValue: {
+    fontSize: "28px",
+    fontWeight: 800,
+    color: "#1d4ed8",
+    lineHeight: 1,
+  },
+  summaryProgressLabel: {
+    marginTop: "6px",
+    fontSize: "12px",
+    fontWeight: 700,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "1.5fr 1fr",
@@ -956,11 +1524,46 @@ const styles = {
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: "12px",
   },
+  summaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "12px",
+  },
   metaItem: {
     backgroundColor: "#f8fafc",
     border: "1px solid #e5e7eb",
     borderRadius: "12px",
     padding: "12px",
+  },
+  summaryStat: {
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  summaryStatValue: {
+    fontWeight: 800,
+    fontSize: "24px",
+    color: "#0f172a",
+  },
+  summaryFindingValue: {
+    fontWeight: 700,
+    color: "#111827",
+    lineHeight: 1.4,
+  },
+  summaryFindingBadge: {
+    display: "inline-block",
+    marginTop: "4px",
+    padding: "4px 8px",
+    borderRadius: "999px",
+    fontSize: "11px",
+    fontWeight: 700,
+    backgroundColor: "#fff7ed",
+    color: "#9a3412",
+    alignSelf: "flex-start",
   },
   metaLabel: {
     display: "block",
@@ -1025,12 +1628,21 @@ const styles = {
     lineHeight: 1.6,
     color: "#1f2937",
   },
+  detailBlock: {
+    marginTop: "12px",
+  },
   warningBox: {
     backgroundColor: "#fff7ed",
     border: "1px solid #fdba74",
     color: "#9a3412",
     padding: "12px",
     borderRadius: "12px",
+  },
+  activeTaskFeedbackBox: {
+    padding: "12px",
+    borderRadius: "12px",
+    backgroundColor: "#f8fafc",
+    border: "1px solid #dbeafe",
   },
   commandList: {
     display: "flex",
@@ -1143,6 +1755,29 @@ const styles = {
     wordBreak: "break-word",
     fontSize: "13px",
   },
+  summaryList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  },
+  summaryListItem: {
+    padding: "12px",
+    borderRadius: "12px",
+    border: "1px solid #e5e7eb",
+    backgroundColor: "#f8fafc",
+  },
+  summaryListTitle: {
+    display: "block",
+    marginBottom: "6px",
+    color: "#0f172a",
+  },
+  summaryListText: {
+    margin: 0,
+    color: "#374151",
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
   stepCard: {
     border: "1px solid #e5e7eb",
     borderRadius: "12px",
@@ -1153,5 +1788,11 @@ const styles = {
     display: "flex",
     gap: "10px",
     flexWrap: "wrap",
+  },
+  badgeRow: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    marginBottom: "8px",
   },
 };

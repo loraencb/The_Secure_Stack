@@ -83,8 +83,11 @@ def write_to_terminal(session: TerminalSession, command: str):
     if session.process.stdin is None:
         raise RuntimeError("Terminal stdin is not available")
 
-    session.process.stdin.write(command + "\n")
-    session.process.stdin.flush()
+    try:
+        session.process.stdin.write(command + "\n")
+        session.process.stdin.flush()
+    except (BrokenPipeError, OSError, ValueError) as exc:
+        raise RuntimeError("Terminal process is no longer accepting input.") from exc
 
 
 def read_from_terminal(session: TerminalSession):

@@ -31,12 +31,48 @@ export async function launchLab(sessionId, labId) {
   return parseJsonResponse(res);
 }
 
+export async function getLabDefinition(labId) {
+  const res = await fetch(`${API}/labs/definition/${labId}`);
+  return parseJsonResponse(res);
+}
+
+export async function getTaskProgress(sessionId) {
+  const res = await fetch(`${API}/task-progress/session/${sessionId}`);
+  return parseJsonResponse(res);
+}
+
+export async function completeTaskProgress(data) {
+  const res = await fetch(`${API}/task-progress/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return parseJsonResponse(res);
+}
+
+export async function attachTaskEvidence(sessionId, labId, taskId, data) {
+  const res = await fetch(
+    `${API}/task-progress/session/${sessionId}/${labId}/${taskId}/evidence`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }
+  );
+  return parseJsonResponse(res);
+}
+
 export async function addFinding(data) {
   const res = await fetch(`${API}/findings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+  return parseJsonResponse(res);
+}
+
+export async function getFindings(sessionId) {
+  const res = await fetch(`${API}/findings/session/${sessionId}`);
   return parseJsonResponse(res);
 }
 

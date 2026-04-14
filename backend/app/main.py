@@ -1,11 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import Base, engine
-from app.routers import labs, sessions, findings, reports, ws_terminal
+from app.database import Base, engine, ensure_task_completion_columns
+from app.routers import labs, sessions, findings, reports, ws_terminal, task_progress
 
 app = FastAPI()
 
 Base.metadata.create_all(bind=engine)
+ensure_task_completion_columns()
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +23,7 @@ app.include_router(labs.router)
 app.include_router(sessions.router)
 app.include_router(findings.router)
 app.include_router(reports.router)
+app.include_router(task_progress.router)
 app.include_router(ws_terminal.router)
 
 

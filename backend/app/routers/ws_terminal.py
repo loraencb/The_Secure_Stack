@@ -24,6 +24,14 @@ logger = logging.getLogger(__name__)
 PROMPT_PATTERN = re.compile(r"\[stderr\]\s.*#\s*$", re.MULTILINE)
 
 
+async def safe_send_json(websocket: WebSocket, payload: dict) -> bool:
+    try:
+        await websocket.send_text(json.dumps(payload))
+        return True
+    except (WebSocketDisconnect, RuntimeError):
+        return False
+
+
 def save_auto_finding(session_id: int, finding: dict):
     db: Session = SessionLocal()
     try:
@@ -41,12 +49,11 @@ def save_auto_finding(session_id: int, finding: dict):
             .filter(
                 models.Finding.session_id == session_id,
                 models.Finding.title == title,
-                models.Finding.description == full_description,
             )
             .first()
         )
         if existing_finding:
-            return existing_finding
+            return existing_finding, False
 
         new_finding = models.Finding(
             session_id=session_id,
@@ -57,7 +64,7 @@ def save_auto_finding(session_id: int, finding: dict):
         db.add(new_finding)
         db.commit()
         db.refresh(new_finding)
-        return new_finding
+        return new_finding, True
     finally:
         db.close()
 
@@ -113,32 +120,31 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
         terminal = create_terminal_session(session_id)
         logger.info("Terminal process started for session %s", session_id)
 
-        await websocket.send_text(
-            json.dumps(
-                {
-                    "type": "terminal_output",
-                    "data": (
-                        f"[Secure Stack terminal connected for session {session_id}]\r\n"
-                        f"[Attacker container: {expected_container}]\r\n"
-                        "[Linux container shell ready]\r\n"
-                    ),
-                }
-            )
-        )
+        if not await safe_send_json(
+            websocket,
+            {
+                "type": "terminal_output",
+                "data": (
+                    f"[Secure Stack terminal connected for session {session_id}]\r\n"
+                    f"[Attacker container: {expected_container}]\r\n"
+                    "[Linux container shell ready]\r\n"
+                ),
+            },
+        ):
+            return
 
         async def pump_output():
             while True:
                 if terminal.process.poll() is not None:
                     code = terminal.process.returncode
-                    with contextlib.suppress(Exception):
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "terminal_output",
-                                    "data": f"\r\n[terminal exited with code {code}]\r\n",
-                                }
-                            )
-                        )
+                    if not await safe_send_json(
+                        websocket,
+                        {
+                            "type": "terminal_output",
+                            "data": f"\r\n[terminal exited with code {code}]\r\n",
+                        },
+                    ):
+                        return
                     break
 
                 output = read_from_terminal(terminal)
@@ -147,15 +153,14 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                     if len(latest_output_buffer) > 200:
                         latest_output_buffer.pop(0)
 
-                    with contextlib.suppress(Exception):
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "terminal_output",
-                                    "data": output,
-                                }
-                            )
-                        )
+                    if not await safe_send_json(
+                        websocket,
+                        {
+                            "type": "terminal_output",
+                            "data": output,
+                        },
+                    ):
+                        return
 
                 await asyncio.sleep(0.05)
 
@@ -198,15 +203,13 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                     session_id,
                     exc,
                 )
-                with contextlib.suppress(Exception):
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "type": "terminal_output",
-                                "data": f"\r\n[terminal write error] {exc}\r\n",
-                            }
-                        )
-                    )
+                await safe_send_json(
+                    websocket,
+                    {
+                        "type": "terminal_output",
+                        "data": f"\r\n[terminal write error] {exc}\r\n",
+                    },
+                )
                 break
 
             command_output = await collect_command_output(latest_output_buffer)
@@ -214,38 +217,37 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
             try:
                 feedback = analyze_terminal_interaction(command, command_output)
 
-                with contextlib.suppress(Exception):
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "type": "ai_feedback",
-                                "data": feedback,
-                            }
-                        )
-                    )
+                if not await safe_send_json(
+                    websocket,
+                    {
+                        "type": "ai_feedback",
+                        "data": feedback,
+                    },
+                ):
+                    break
 
                 finding_detected = feedback.get("finding_detected")
                 finding_confidence = feedback.get("finding_confidence")
                 finding = feedback.get("finding")
 
                 if finding_detected and finding and finding_confidence == "high":
-                    saved_finding = save_auto_finding(session_id, finding)
+                    saved_finding, was_created = save_auto_finding(session_id, finding)
 
-                    with contextlib.suppress(Exception):
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "finding_auto_saved",
-                                    "data": {
-                                        "id": saved_finding.id,
-                                        "session_id": saved_finding.session_id,
-                                        "title": saved_finding.title,
-                                        "severity": saved_finding.severity,
-                                        "description": saved_finding.description,
-                                    },
-                                }
-                            )
-                        )
+                    if was_created:
+                        if not await safe_send_json(
+                            websocket,
+                            {
+                                "type": "finding_auto_saved",
+                                "data": {
+                                    "id": saved_finding.id,
+                                    "session_id": saved_finding.session_id,
+                                    "title": saved_finding.title,
+                                    "severity": saved_finding.severity,
+                                    "description": saved_finding.description,
+                                },
+                            },
+                        ):
+                            break
 
             except Exception as exc:
                 logger.exception(
@@ -253,41 +255,40 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                     session_id,
                     exc,
                 )
-                with contextlib.suppress(Exception):
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "type": "ai_feedback",
-                                "data": {
-                                    "assessment": "neutral",
-                                    "phase": "general-navigation",
-                                    "explanation": "AI feedback failed.",
-                                    "security_relevance": "No analysis available.",
-                                    "next_step": "Continue with the guided recon steps and review the command output manually.",
-                                    "warning": str(exc),
-                                    "finding_detected": False,
-                                    "finding_confidence": "low",
-                                    "finding": None,
-                                },
-                            }
-                        )
-                    )
+                if not await safe_send_json(
+                    websocket,
+                    {
+                        "type": "ai_feedback",
+                        "data": {
+                            "assessment": "neutral",
+                            "phase": "general-navigation",
+                            "explanation": "AI feedback failed.",
+                            "security_relevance": "No analysis available.",
+                            "next_step": "Continue with the guided recon steps and review the command output manually.",
+                            "warning": str(exc),
+                            "finding_detected": False,
+                            "finding_confidence": "low",
+                            "finding": None,
+                        },
+                    },
+                ):
+                    break
 
+    except (WebSocketDisconnect, RuntimeError):
+        logger.info("Terminal websocket closed cleanly for session %s", session_id)
     except Exception as exc:
         logger.exception(
             "Terminal websocket error for session %s: %s",
             session_id,
             exc,
         )
-        with contextlib.suppress(Exception):
-            await websocket.send_text(
-                json.dumps(
-                    {
-                        "type": "terminal_output",
-                        "data": f"\r\n[terminal error] {exc}\r\n",
-                    }
-                )
-            )
+        await safe_send_json(
+            websocket,
+            {
+                "type": "terminal_output",
+                "data": f"\r\n[terminal error] {exc}\r\n",
+            },
+        )
 
     finally:
         db.close()
