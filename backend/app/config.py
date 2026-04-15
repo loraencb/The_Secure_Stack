@@ -3,6 +3,13 @@ import shlex
 import tempfile
 from pathlib import Path
 
+INSECURE_AUTH_SECRETS = {
+    "",
+    "securestack-dev-secret",
+    "change-this-for-production",
+    "change-this-to-a-long-random-secret",
+}
+
 
 def _parse_int(value: str | None, default: int, *, minimum: int | None = 1) -> int:
     try:
@@ -47,6 +54,18 @@ def _parse_command(value: str | None, default: list[str]) -> list[str]:
     return parsed or default
 
 
+def _parse_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _build_default_database_url() -> str:
     configured_url = os.getenv("SECURESTACK_DATABASE_URL")
     if configured_url:
@@ -84,6 +103,18 @@ class Settings:
         self.database_connect_retry_delay = _parse_float(
             os.getenv("SECURESTACK_DATABASE_CONNECT_RETRY_DELAY"),
             1.5,
+        )
+        self.run_migrations_on_startup = _parse_bool(
+            os.getenv("SECURESTACK_RUN_MIGRATIONS_ON_STARTUP"),
+            True,
+        )
+        self.cleanup_stale_labs_on_startup = _parse_bool(
+            os.getenv("SECURESTACK_CLEANUP_STALE_LABS_ON_STARTUP"),
+            True,
+        )
+        self.auto_create_schema = _parse_bool(
+            os.getenv("SECURESTACK_AUTO_CREATE_SCHEMA"),
+            False,
         )
 
         self.auth_token_secret = (
@@ -152,6 +183,68 @@ class Settings:
             0,
             minimum=0,
         )
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+    def validate(self):
+        if "*" in self.cors_origins:
+            raise RuntimeError(
+                "SECURESTACK_CORS_ORIGINS cannot contain '*' because Secure Stack uses credentialed requests."
+            )
+
+        if self.minimum_password_length < 8:
+            raise RuntimeError(
+                "SECURESTACK_MIN_PASSWORD_LENGTH must be at least 8."
+            )
+
+        if self.is_production:
+            if (
+                self.auth_token_secret in INSECURE_AUTH_SECRETS
+                or len(self.auth_token_secret) < 32
+            ):
+                raise RuntimeError(
+                    "SECURESTACK_AUTH_TOKEN_SECRET must be set to a strong non-default value in production."
+                )
+
+    def startup_warnings(self) -> list[str]:
+        warnings: list[str] = []
+
+        if self.is_production and self.database_url.startswith("sqlite"):
+            warnings.append(
+                "SQLite is configured in production mode. PostgreSQL is recommended for durable deployment."
+            )
+
+        if self.is_production and any(
+            "localhost" in origin or "127.0.0.1" in origin
+            for origin in self.cors_origins
+        ):
+            warnings.append(
+                "CORS origins still reference localhost. Confirm this matches the deployed frontend host."
+            )
+
+        if self.api_workers == 1:
+            warnings.append(
+                "API workers are set to 1. This is acceptable for small deployments but limits backend concurrency."
+            )
+
+        if self.is_production and self.auto_create_schema:
+            warnings.append(
+                "SECURESTACK_AUTO_CREATE_SCHEMA is enabled in production. Prefer Alembic migrations instead."
+            )
+
+        if self.is_production and not self.run_migrations_on_startup:
+            warnings.append(
+                "Automatic Alembic migrations are disabled. Ensure `alembic upgrade head` runs before the backend starts."
+            )
+
+        if self.is_production and not self.cleanup_stale_labs_on_startup:
+            warnings.append(
+                "Stale lab cleanup on startup is disabled. Ensure ended or broken lab environments are cleaned up by another operational path."
+            )
+
+        return warnings
 
 
 settings = Settings()

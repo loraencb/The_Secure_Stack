@@ -102,12 +102,13 @@ def generate_summary(findings):
                 ],
                 "summary": "The report generator returned malformed AI output, so a fallback summary was produced from the saved findings.",
             }
-    except requests.RequestException:
+    except requests.RequestException as exc:
         logger.warning(
-            "ai_summary_unavailable findings=%s ollama_url=%s model=%s",
+            "ai_summary_unavailable findings=%s ollama_url=%s model=%s error=%s",
             len(findings),
             settings.ollama_url,
             settings.ollama_model,
+            exc,
         )
         highest = "Low"
         if any((finding.severity or "").lower() == "high" for finding in findings):

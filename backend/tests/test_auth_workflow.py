@@ -2,27 +2,31 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from alembic import command
 from fastapi import HTTPException
 
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = Path(tempfile.gettempdir()) / "SecureStack" / "securestack_test_suite.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+if DB_PATH.exists():
+    DB_PATH.unlink()
+journal_path = DB_PATH.with_name(f"{DB_PATH.name}-journal")
+if journal_path.exists():
+    journal_path.unlink()
 os.environ["SECURESTACK_DATABASE_PATH"] = str(DB_PATH)
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app import models, schemas  # noqa: E402
 from app.database import (  # noqa: E402
-    Base,
     SessionLocal,
     engine,
-    ensure_finding_columns,
-    ensure_session_columns,
-    ensure_task_completion_columns,
+    get_alembic_config,
 )
 from app.routers.auth import login_user, logout_user, register_user  # noqa: E402
 from app.routers.findings import create_finding, get_findings  # noqa: E402
@@ -30,12 +34,82 @@ from app.routers.labs import launch_lab_route  # noqa: E402
 from app.routers.reports import generate_report  # noqa: E402
 from app.routers.sessions import get_session, get_session_history, start_session  # noqa: E402
 from app.security import get_user_for_token  # noqa: E402
+from app.services.lab_cleanup import (  # noqa: E402
+    cleanup_stale_lab_resources,
+    teardown_session_environment,
+)
+from app.services.lab_resources import build_managed_labels  # noqa: E402
 
 
-Base.metadata.create_all(bind=engine)
-ensure_session_columns()
-ensure_finding_columns()
-ensure_task_completion_columns()
+command.upgrade(get_alembic_config(), "head")
+
+
+class NotFound(Exception):
+    pass
+
+
+class FakeContainer:
+    def __init__(self, name, labels, registry, status="running"):
+        self.name = name
+        self.labels = labels
+        self.status = status
+        self._registry = registry
+
+    def reload(self):
+        return None
+
+    def stop(self, timeout=5):
+        self.status = "exited"
+
+    def remove(self, force=True):
+        self._registry.pop(self.name, None)
+
+
+class FakeNetwork:
+    def __init__(self, name, labels, registry):
+        self.name = name
+        self.attrs = {"Labels": labels}
+        self._registry = registry
+
+    def remove(self):
+        self._registry.pop(self.name, None)
+
+
+class FakeContainerManager:
+    def __init__(self, registry):
+        self._registry = registry
+
+    def list(self, all=False):
+        return list(self._registry.values())
+
+    def get(self, name):
+        if name not in self._registry:
+            raise NotFound(name)
+        return self._registry[name]
+
+
+class FakeNetworkManager:
+    def __init__(self, registry):
+        self._registry = registry
+
+    def list(self):
+        return list(self._registry.values())
+
+    def get(self, name):
+        if name not in self._registry:
+            raise NotFound(name)
+        return self._registry[name]
+
+
+class FakeDockerClient:
+    def __init__(self, containers=None, networks=None):
+        self._containers = containers or {}
+        self._networks = networks or {}
+        self.containers = FakeContainerManager(self._containers)
+        self.networks = FakeNetworkManager(self._networks)
+
+    def close(self):
+        return None
 
 
 class SecureStackAuthWorkflowTests(unittest.TestCase):
@@ -107,7 +181,11 @@ class SecureStackAuthWorkflowTests(unittest.TestCase):
             )
 
         self.assertEqual(launched["attacker_container"], fake_launch["attacker_container"])
-        refreshed_session = get_session(session.id, self.db, user)
+        with patch(
+            "app.routers.sessions.reconcile_session_environment",
+            return_value=None,
+        ):
+            refreshed_session = get_session(session.id, self.db, user)
         self.assertEqual(refreshed_session.attacker_container, fake_launch["attacker_container"])
         self.assertIsNotNone(refreshed_session.environment_launched_at)
 
@@ -175,6 +253,109 @@ class SecureStackAuthWorkflowTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as error_context:
             get_session(owned_session.id, self.db, user_two)
         self.assertEqual(error_context.exception.status_code, 404)
+
+    def test_completed_session_cannot_launch_environment(self):
+        user, _ = self.register_user("completed@example.com", "Completed")
+        session = start_session(
+            schemas.SessionCreate(
+                lab_name="juice-shop",
+                lab_id="juice-shop-recon",
+            ),
+            self.db,
+            user,
+        )
+        session.status = "completed"
+        session.end_time = datetime.now(timezone.utc)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as error_context:
+            launch_lab_route(session.id, "juice-shop-recon", self.db, user)
+
+        self.assertEqual(error_context.exception.status_code, 400)
+
+    def test_teardown_clears_runtime_metadata_when_docker_is_unavailable(self):
+        user, _ = self.register_user("cleanup@example.com", "Cleanup")
+        session = start_session(
+            schemas.SessionCreate(
+                lab_name="cleanup-lab",
+                lab_id="juice-shop-recon",
+            ),
+            self.db,
+            user,
+        )
+        session.environment_launched_at = datetime.now(timezone.utc)
+        session.attacker_container = f"attacker-{session.id}"
+        session.target_container = f"target-{session.id}"
+        session.network_name = f"lab-net-{session.id}"
+        session.browser_url = "http://localhost:31337"
+        self.db.commit()
+
+        with patch(
+            "app.services.lab_cleanup.get_docker_client",
+            side_effect=RuntimeError("Docker unavailable"),
+        ):
+            cleanup = teardown_session_environment(
+                session,
+                reason="unit_test_teardown",
+                include_derived=True,
+                clear_runtime=True,
+            )
+
+        self.assertEqual(cleanup["status"], "deferred")
+        self.assertTrue(cleanup["cleared_runtime_metadata"])
+        self.assertIsNone(session.environment_launched_at)
+        self.assertIsNone(session.attacker_container)
+        self.assertIsNone(session.target_container)
+        self.assertIsNone(session.network_name)
+        self.assertIsNone(session.browser_url)
+
+    def test_startup_cleanup_removes_untracked_session_resources(self):
+        user, _ = self.register_user("startup@example.com", "Startup")
+        session = start_session(
+            schemas.SessionCreate(
+                lab_name="startup-lab",
+                lab_id="juice-shop-recon",
+            ),
+            self.db,
+            user,
+        )
+
+        container_labels = build_managed_labels(
+            session.id,
+            session.lab_id,
+            "attacker_container",
+        )
+        network_labels = build_managed_labels(
+            session.id,
+            session.lab_id,
+            "network",
+        )
+        containers = {}
+        networks = {}
+        container = FakeContainer(
+            f"attacker-{session.id}",
+            container_labels,
+            containers,
+        )
+        network = FakeNetwork(
+            f"lab-net-{session.id}",
+            network_labels,
+            networks,
+        )
+        containers[container.name] = container
+        networks[network.name] = network
+        fake_client = FakeDockerClient(containers=containers, networks=networks)
+
+        with patch(
+            "app.services.lab_cleanup.get_docker_client",
+            return_value=fake_client,
+        ):
+            result = cleanup_stale_lab_resources(self.db)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["removed_count"], 2)
+        self.assertFalse(containers)
+        self.assertFalse(networks)
 
 
 if __name__ == "__main__":

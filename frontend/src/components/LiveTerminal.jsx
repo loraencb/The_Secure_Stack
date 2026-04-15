@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
@@ -27,7 +34,7 @@ function formatShellPrompt({ user, host, path, marker }) {
   );
 }
 
-export default function LiveTerminal({
+const LiveTerminal = forwardRef(function LiveTerminal({
   sessionId,
   containerLabel,
   onFeedback,
@@ -35,7 +42,7 @@ export default function LiveTerminal({
   onFindingAutoSaved,
   onCommandSubmitted,
   onCommandResult,
-}) {
+}, ref) {
   const terminalRef = useRef(null);
   const termInstanceRef = useRef(null);
   const socketRef = useRef(null);
@@ -78,6 +85,32 @@ export default function LiveTerminal({
     shellMetaRef.current = nextShellMeta;
     setShellMeta(nextShellMeta);
   }, [containerLabel, sessionId]);
+
+  const requestTutorHelp = useCallback((intent = "hint") => {
+    const socket = socketRef.current;
+
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      throw new Error("The tutor is only available while the live shell is connected.");
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "ask_tutor",
+        intent,
+      })
+    );
+  }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      requestTutorHelp,
+      focus() {
+        terminalRef.current?.focus();
+      },
+    }),
+    [requestTutorHelp]
+  );
 
   useEffect(() => {
     if (!sessionId || !terminalRef.current) return;
@@ -296,7 +329,12 @@ export default function LiveTerminal({
         commandOutputRef.current = "";
         promptVisibleRef.current = false;
 
-        socket.send(currentLine);
+        socket.send(
+          JSON.stringify({
+            type: "terminal_input",
+            command: currentLine,
+          })
+        );
         term.write("\r\n");
         currentLine = "";
       } else if (code === 127) {
@@ -374,4 +412,6 @@ export default function LiveTerminal({
       <div ref={terminalRef} className="terminal-shell__viewport" />
     </div>
   );
-}
+});
+
+export default LiveTerminal;

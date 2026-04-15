@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import {
   addFinding,
   completeTaskProgress,
+  endSession,
   getFindings,
   getLabDefinition,
   getReport,
@@ -9,6 +10,7 @@ import {
   getTaskProgress,
   launchLab,
   startSession,
+  teardownLab,
 } from "../api/Client";
 import {
   DEFAULT_LAB_ID,
@@ -20,6 +22,7 @@ import {
   getSessionSummary,
   getStoredLabId,
   getStoredSessionId,
+  hydrateRuntimeLabSteps,
   mergeFindings,
   mergeLabSteps,
   setStoredLabId,
@@ -72,6 +75,9 @@ export function SecureStackProvider({ children }) {
   const [generatingReport, setGeneratingReport] = useState(false);
   const [acceptingSuggestion, setAcceptingSuggestion] = useState(false);
   const [launchingLab, setLaunchingLab] = useState(false);
+  const [tearingDownLab, setTearingDownLab] = useState(false);
+  const [resettingLab, setResettingLab] = useState(false);
+  const [endingSession, setEndingSession] = useState(false);
   const [taskProgress, setTaskProgress] = useState({});
   const [sessionSyncing, setSessionSyncing] = useState(false);
   const [sessionLoadError, setSessionLoadError] = useState("");
@@ -134,12 +140,17 @@ export function SecureStackProvider({ children }) {
       return;
     }
 
+    const resolvedDefinitionSteps = hydrateRuntimeLabSteps(
+      activeLabDefinition.tasks || [],
+      labInfo
+    );
+
     setLabSteps((prevSteps) =>
       prevSteps?.length
-        ? mergeLabSteps(activeLabDefinition.tasks || [], prevSteps || [])
-        : activeLabDefinition.tasks || []
+        ? mergeLabSteps(resolvedDefinitionSteps, prevSteps || [])
+        : resolvedDefinitionSteps
     );
-  }, [activeLabDefinition]);
+  }, [activeLabDefinition, labInfo]);
 
   useEffect(() => {
     setStoredSessionId(sessionId);
@@ -185,13 +196,16 @@ export function SecureStackProvider({ children }) {
       try {
         const sessionData = await getSession(sessionId);
         if (!cancelled) {
+          const persistedLabInfo = buildPersistedLabInfo(sessionData);
           setSessionRecord(sessionData);
-          setLabInfo(buildPersistedLabInfo(sessionData));
+          setLabInfo(persistedLabInfo);
           if (sessionData.lab_id) {
             setActiveLabId(sessionData.lab_id);
             const syncedDefinition = labDefinitions[sessionData.lab_id];
             if (syncedDefinition?.tasks?.length) {
-              setLabSteps(syncedDefinition.tasks);
+              setLabSteps(
+                hydrateRuntimeLabSteps(syncedDefinition.tasks, persistedLabInfo)
+              );
             }
           }
         }
@@ -312,6 +326,31 @@ export function SecureStackProvider({ children }) {
     setWorkflowState(getDefaultWorkflowState());
   }
 
+  function clearRuntimeSessionState(definition = activeLabDefinition) {
+    const clearedSteps = hydrateRuntimeLabSteps(definition?.tasks || [], null);
+
+    setLabInfo(null);
+    setLabSteps(clearedSteps);
+    setSessionRecord((prev) =>
+      prev
+        ? {
+            ...prev,
+            environment_launched_at: null,
+            attacker_container: null,
+            target_container: null,
+            network_name: null,
+            browser_url: null,
+          }
+        : prev
+    );
+    setWorkflowState((prev) => ({
+      ...prev,
+      environmentLaunchedAt: "",
+    }));
+    setTerminalFeedback(null);
+    setFindingSuggestion(null);
+  }
+
   async function startNewSession(labId = activeLabId) {
     const labConfig = getLabCatalogEntry(labId);
     setStartingSession(true);
@@ -386,6 +425,14 @@ export function SecureStackProvider({ children }) {
       throw error;
     }
 
+    if (sessionRecord?.status === "completed" || sessionRecord?.end_time) {
+      const error = new Error(
+        "This session has been ended. Start a new session to launch another environment."
+      );
+      setMessage(error.message);
+      throw error;
+    }
+
     setLaunchingLab(true);
     setMessage("");
 
@@ -422,6 +469,118 @@ export function SecureStackProvider({ children }) {
       throw error;
     } finally {
       setLaunchingLab(false);
+    }
+  }
+
+  async function teardownActiveLab({ silent = false } = {}) {
+    if (!sessionId) {
+      const error = new Error("Start a session first.");
+      if (!silent) {
+        setMessage(error.message);
+      }
+      throw error;
+    }
+
+    setTearingDownLab(true);
+    if (!silent) {
+      setMessage("");
+    }
+
+    try {
+      const cleanup = await teardownLab(sessionId);
+      clearRuntimeSessionState(activeLabDefinition || labDefinitions[activeLabId]);
+
+      if (!silent) {
+        const cleanupStatus = cleanup?.status;
+        setMessage(
+          cleanupStatus === "partial"
+            ? "Environment cleanup finished with warnings. Check the logs if resources remain."
+            : cleanupStatus === "deferred"
+            ? "Runtime state was cleared, but Docker cleanup was deferred because the container runtime is unavailable."
+            : cleanupStatus === "noop"
+            ? "No active lab resources were found for this session."
+            : "Environment cleaned up."
+        );
+      }
+
+      return cleanup;
+    } catch (error) {
+      console.error("Lab teardown error:", error);
+      if (!silent) {
+        setMessage(error.message || "Failed to clean up the lab environment.");
+      }
+      throw error;
+    } finally {
+      setTearingDownLab(false);
+    }
+  }
+
+  async function resetActiveLab() {
+    if (!sessionId) {
+      const error = new Error("Start a session first.");
+      setMessage(error.message);
+      throw error;
+    }
+
+    if (sessionRecord?.status === "completed" || sessionRecord?.end_time) {
+      const error = new Error(
+        "Completed sessions cannot reset the environment. Start a new session instead."
+      );
+      setMessage(error.message);
+      throw error;
+    }
+
+    setResettingLab(true);
+    setMessage("");
+
+    try {
+      await teardownActiveLab({ silent: true });
+      const data = await launchActiveLab();
+      setMessage("Environment reset successfully.");
+      return data;
+    } catch (error) {
+      console.error("Lab reset error:", error);
+      setMessage(error.message || "Failed to reset the lab environment.");
+      throw error;
+    } finally {
+      setResettingLab(false);
+    }
+  }
+
+  async function endCurrentSession() {
+    if (!sessionId) {
+      const error = new Error("Start a session first.");
+      setMessage(error.message);
+      throw error;
+    }
+
+    setEndingSession(true);
+    setMessage("");
+
+    try {
+      const currentSessionId = sessionId;
+      const definition = activeLabDefinition || labDefinitions[activeLabId] || null;
+      const response = await endSession(currentSessionId);
+      const cleanupStatus = response?.cleanup?.status;
+
+      setSessionId(null);
+      setWorkflowStateSessionId(null);
+      resetTransientSessionState(definition);
+      setMessage(
+        cleanupStatus === "partial"
+          ? `Session ${currentSessionId} ended, but environment cleanup reported warnings.`
+          : cleanupStatus === "deferred"
+          ? `Session ${currentSessionId} ended. Runtime state was cleared, and Docker cleanup will retry when the runtime is available again.`
+          : `Session ${currentSessionId} ended and the environment was cleaned up.`
+      );
+
+      return response;
+    } catch (error) {
+      console.error("End session error:", error);
+      setMessage(error.message || "Failed to end the session.");
+      throw error;
+    } finally {
+      setEndingSession(false);
     }
   }
 
@@ -842,6 +1001,9 @@ export function SecureStackProvider({ children }) {
     generatingReport,
     acceptingSuggestion,
     launchingLab,
+    tearingDownLab,
+    resettingLab,
+    endingSession,
     labSteps,
     taskProgress,
     findingForm,
@@ -851,6 +1013,9 @@ export function SecureStackProvider({ children }) {
     startNewSession,
     setSessionFromRoute,
     launchActiveLab,
+    teardownActiveLab,
+    resetActiveLab,
+    endCurrentSession,
     handleTerminalFeedback,
     handleCommandSubmitted,
     clearFeedback,

@@ -1,6 +1,6 @@
 # Secure Stack
 
-Secure Stack is a multi-user cybersecurity training platform that combines containerized labs, a guided session workspace, live terminal interaction, AI-assisted coaching, evidence-aware findings, and report generation in one workflow-aware application.
+Secure Stack is a multi-user cybersecurity training platform that combines containerized labs, a guided session workspace, live terminal interaction, adaptive AI tutoring, evidence-aware findings, and report generation in one workflow-aware application.
 
 ## What Secure Stack Does
 
@@ -12,7 +12,7 @@ Secure Stack is built around a real lab journey:
 4. The learner works through a guided lab workspace.
 5. Terminal activity, task progress, and AI feedback shape the session flow.
 6. Evidence is turned into findings and findings are turned into reports.
-7. Sessions can be refreshed, resumed, and revisited later from session history.
+7. Sessions can be refreshed, resumed, cleaned up, and revisited later from session history.
 
 The result is more than a lab launcher. It is a guided cyber investigation platform with durable session state and backend-backed ownership.
 
@@ -23,10 +23,14 @@ The result is more than a lab launcher. It is a guided cyber investigation platf
 - Nested session workspace with `Overview`, `Guide`, `Workspace`, and `Reports`.
 - Real-time terminal access over WebSockets with a shell-style prompt and Docker-backed exec sessions.
 - Structured lab modules loaded from `labs/*/metadata.json`.
+- Formal lab schema validation and backward-compatible normalization for authored labs.
 - Task progress persistence with evidence capture and instructional AI evaluation.
 - Workflow-aware guidance that reacts to launch state, progress, findings, and reports.
+- Lab-manual-style Guide with topology-aware steps and richer instructional metadata.
+- Step-aware AI tutor with progressive hint escalation and explicit Ask Tutor actions.
 - Evidence-aware findings and report readiness cues.
 - Investigation timeline and durable session history.
+- Environment teardown and cleanup workflow for lab lifecycle safety.
 - Deployment-ready Docker Compose stack with frontend, backend, and PostgreSQL.
 
 ## Core Capabilities
@@ -36,7 +40,7 @@ The result is more than a lab launcher. It is a guided cyber investigation platf
 Each active lab session behaves like a mini application inside the platform:
 
 - `Overview` shows session status, progress, environment details, and investigation timeline.
-- `Guide` walks the learner through the current lab step by step.
+- `Guide` acts like a lab manual with objectives, topology, instructions, explanations, expected outcomes, and hints.
 - `Workspace` provides the live terminal, AI review, and active task context.
 - `Reports` organizes findings, evidence context, and report generation.
 
@@ -70,6 +74,23 @@ This intelligence powers:
 - report readiness cues
 - investigation timeline summaries
 
+### Adaptive AI Tutor
+
+Secure Stack's tutor is aware of the active lab and step context, not just raw terminal output. It uses:
+
+- current lab and step metadata
+- topology summary
+- recent commands and outputs
+- task objective and expected outcome
+- prior struggle, off-track, and help signals
+
+The tutor currently supports:
+
+- progressive hint levels
+- off-track redirection
+- learning-oriented success explanations
+- explicit Ask Tutor actions for hint, explanation, stuck support, and next-step help
+
 ### Authentication and Data Ownership
 
 The platform now supports:
@@ -89,6 +110,7 @@ Lab environments are launched per session using Docker. The backend manages:
 - per-session network names
 - launch/runtime metadata
 - terminal exec sessions inside the attacker container
+- teardown and cleanup of attacker, target, and network resources
 - clearer failure handling when Docker or lab services are unavailable
 
 ### Durable Persistence
@@ -176,6 +198,33 @@ A typical lab module can include:
 - task definitions, hints, remediation guidance, and success criteria
 
 This keeps lab content version-controlled and reusable without hardcoding every lab into the backend or frontend.
+
+### Lab Authoring and Validation
+
+Secure Stack now validates lab metadata when the backend loads each lab. Invalid labs fail early with author-facing errors instead of breaking later inside the Guide, tutor, or launcher.
+
+Validation currently covers:
+
+- top-level identity and description fields
+- runtime attacker/target configuration
+- topology structure and connection integrity
+- step/task structure and duplicate ids
+- step guidance and evidence fields required by the Guide and tutor
+- optional manual file paths when provided
+
+Backward-compatible aliases are still normalized where practical:
+
+- `id` -> `lab_id`
+- `title` -> `name`
+- `steps` -> `tasks`
+- `objectives` -> `learning_objectives`
+- `hint_text` -> first hint
+
+Authoring references:
+
+- [labs/lab.schema.json](labs/lab.schema.json)
+- [labs/LAB_AUTHORING.md](labs/LAB_AUTHORING.md)
+- [labs/examples/metadata.example.json](labs/examples/metadata.example.json)
 
 ## API Overview
 
@@ -306,6 +355,13 @@ A practical end-to-end validation flow is:
 - The backend needs Docker socket access to launch lab containers and open terminal exec sessions.
 - The frontend is served through Nginx in the Compose setup.
 - The backend includes clearer logging for auth errors, launch failures, database issues, and AI service problems.
+
+## Documentation Map
+
+- [README.md](README.md): primary project overview and developer entry point
+- [DEPLOYMENT.md](DEPLOYMENT.md): containerized deployment and migration flow
+- [labs/LAB_AUTHORING.md](labs/LAB_AUTHORING.md): lab schema and authoring rules
+- [secure_stack_roadmap.md](secure_stack_roadmap.md): planned future work
 
 ## Current Status
 

@@ -8,6 +8,7 @@ import {
   taskStatusMeta,
 } from "../../utils/session";
 import { badgeClass } from "./sessionUi";
+import LabTopologyCard from "./LabTopologyCard";
 
 function getStepDisplayStatus({
   index,
@@ -32,6 +33,18 @@ function getStepDisplayStatus({
   }
 
   return "pending";
+}
+
+function getGuideHints(step) {
+  if (Array.isArray(step?.hints) && step.hints.length) {
+    return step.hints;
+  }
+
+  if (step?.hint_text) {
+    return [step.hint_text];
+  }
+
+  return [];
 }
 
 export default function SessionGuidePanel() {
@@ -141,6 +154,12 @@ export default function SessionGuidePanel() {
   const evidence = stepProgress?.evidence_quality
     ? evidenceQualityMeta[stepProgress.evidence_quality]
     : null;
+  const guideHints = getGuideHints(step);
+  const stepExplanation = step.explanation || step.objective || step.instruction;
+  const expectedOutcome =
+    step.expected_outcome ||
+    step.success_criteria?.[0] ||
+    "Capture evidence that proves the step objective was satisfied.";
   const walkthroughPercent = Math.round(
     ((safeStepIndex + 1) / labSteps.length) * 100
   );
@@ -148,24 +167,44 @@ export default function SessionGuidePanel() {
 
   return (
     <div className="page-stack">
-      <section className="surface-card guide-panel">
+      <section className="surface-card guide-panel guide-panel--primary">
         <div className="section-heading">
           <div>
             <span className="eyebrow">Lab Guide</span>
-            <h2>Step Walkthrough</h2>
+            <h2>Guided Lab Manual</h2>
           </div>
           <span className="section-note">
             {activeLabDefinition?.estimated_duration_minutes
               ? `${activeLabDefinition.estimated_duration_minutes} min estimate`
-              : "Step-by-step instructions"}
+              : "Structured lab walkthrough"}
           </span>
         </div>
 
         <p className="section-lead">
-          Follow one step at a time here, then take it into the workspace when
-          you are ready to validate it live. The workflow recommendation updates
-          as the session state changes.
+          Use this guide as the lab manual for the current session. Review the
+          lab context, understand the goal of the active step, then take the
+          work into the workspace when you are ready to validate it live.
         </p>
+
+        <div className="guide-manual-grid">
+          <div className="detail-box detail-box--accent guide-brief-card">
+            <span className="detail-label">Lab Overview</span>
+            <p>{activeLabDefinition?.description || "The active lab is loading."}</p>
+
+            {activeLabDefinition?.learning_objectives?.length ? (
+              <div className="guide-brief-card__stack">
+                <span className="detail-label">Learning Objectives</span>
+                <ul className="detail-list guide-learning-list">
+                  {activeLabDefinition.learning_objectives.map((objective) => (
+                    <li key={objective}>{objective}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+
+          <LabTopologyCard topology={activeLabDefinition?.topology} />
+        </div>
 
         <div className="progress-bar">
           <div
@@ -251,6 +290,16 @@ export default function SessionGuidePanel() {
               <p>{step.instruction}</p>
             </div>
 
+            <div className="detail-box">
+              <span className="detail-label">Explanation</span>
+              <p>{stepExplanation}</p>
+            </div>
+
+            <div className="detail-box">
+              <span className="detail-label">Expected Outcome</span>
+              <p>{expectedOutcome}</p>
+            </div>
+
             {step.command_hint ? (
               <div className="guide-command-card">
                 <span className="detail-label">Command Hint</span>
@@ -283,10 +332,31 @@ export default function SessionGuidePanel() {
           </div>
 
           <div className="guide-step-side">
-            {step.hint_text ? (
+            {guideHints.length ? (
               <div className="detail-box">
-                <span className="detail-label">Hint</span>
-                <p>{step.hint_text}</p>
+                <span className="detail-label">Hints</span>
+                <div className="guide-hint-list">
+                  {guideHints.map((hint, index) => (
+                    <details
+                      key={`${step.task_id}-hint-${index}`}
+                      className="guide-hint"
+                    >
+                      <summary>Hint {index + 1}</summary>
+                      <p>{hint}</p>
+                    </details>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {step.expected_evidence?.length ? (
+              <div className="detail-box">
+                <span className="detail-label">Look For</span>
+                <ul className="detail-list">
+                  {step.expected_evidence.map((evidenceItem) => (
+                    <li key={evidenceItem}>{evidenceItem}</li>
+                  ))}
+                </ul>
               </div>
             ) : null}
 

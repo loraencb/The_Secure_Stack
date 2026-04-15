@@ -21,6 +21,8 @@ Important values to review:
 - `SECURESTACK_AUTH_TOKEN_SECRET`
 - `POSTGRES_PASSWORD`
 - `SECURESTACK_DATABASE_URL`
+- `SECURESTACK_RUN_MIGRATIONS_ON_STARTUP`
+- `SECURESTACK_AUTO_CREATE_SCHEMA`
 - `SECURESTACK_CORS_ORIGINS`
 - `SECURESTACK_OLLAMA_URL`
 - `SECURESTACK_TARGET_PUBLIC_HOST`
@@ -39,26 +41,65 @@ For lab launches in Docker Compose:
 docker compose up --build
 ```
 
+The Compose file now requires real values for:
+
+- `POSTGRES_PASSWORD`
+- `SECURESTACK_AUTH_TOKEN_SECRET`
+
+If you override `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB`, make sure `SECURESTACK_DATABASE_URL` matches the same credentials and database name.
+If you change PostgreSQL credentials for an existing named volume, recreate the database volume or rotate the credentials inside PostgreSQL as well. Otherwise the backend will fail startup with a password authentication error.
+
 Services:
 
 - Frontend: `http://localhost:8080`
 - Backend API: `http://localhost:8000`
 - PostgreSQL: internal-only by default
+- Backend readiness: `http://localhost:8000/health/ready`
 
 ## 3. What happens on startup
 
 The backend container:
 
 1. waits for the configured database
-2. initializes tables
-3. applies lightweight schema repair for existing SQLite-era columns
-4. starts Uvicorn with the configured host/port/workers
+2. validates production-critical settings
+3. runs `alembic upgrade head` by default
+4. verifies the required schema is present
+5. starts Uvicorn with proxy-header support enabled
+
+## Alembic migrations
+
+Secure Stack now manages schema changes through Alembic.
+
+Common commands:
+
+```bash
+cd backend
+alembic upgrade head
+alembic current
+alembic history
+```
+
+For Docker Compose:
+
+```bash
+docker compose run --rm backend alembic upgrade head
+```
+
+Notes:
+
+- `SECURESTACK_RUN_MIGRATIONS_ON_STARTUP=1` keeps the current single-stack deployment convenient by applying migrations during backend bootstrap.
+- In a more controlled production environment, you can set `SECURESTACK_RUN_MIGRATIONS_ON_STARTUP=0` and run `alembic upgrade head` explicitly before starting the backend.
+- `SECURESTACK_AUTO_CREATE_SCHEMA=1` is only a lightweight dev fallback for an empty database. It is not the recommended production path.
 
 ## Production notes
 
 - The backend expects Docker socket access for lab launches and terminal sessions.
 - `docker-compose.yml` mounts `/var/run/docker.sock` into the backend container.
+- The backend health check now uses `/health/ready`, which verifies both database access and Docker runtime availability.
+- The frontend exposes `/healthz` for container health checks.
+- All Compose services use `restart: unless-stopped` for more predictable recovery.
 - Lab launch failures, Docker connectivity issues, database connection retries, and AI service failures now log with clearer backend messages.
+- If a database already exists but is not tracked by Alembic yet, run `alembic stamp head` only after confirming it already matches the current schema.
 - SQLite still works for local fallback, but PostgreSQL is now the recommended deployment database.
 
 ## Local non-container fallback

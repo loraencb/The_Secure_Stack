@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.dependencies import get_current_user, get_db, get_owned_session_or_404
+from app.services.lab_cleanup import reconcile_session_environment, teardown_session_environment
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 logger = logging.getLogger("securestack.sessions")
@@ -106,7 +107,17 @@ def get_session(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return get_owned_session_or_404(db, session_id, current_user.id)
+    session = get_owned_session_or_404(db, session_id, current_user.id)
+    reconciliation = reconcile_session_environment(session, reason="session_load")
+    if reconciliation:
+        db.commit()
+        logger.info(
+            "session_runtime_reconciled user_id=%s session_id=%s status=%s",
+            current_user.id,
+            session.id,
+            reconciliation["status"],
+        )
+    return session
 
 
 @router.post("/end/{session_id}")
@@ -116,14 +127,25 @@ def end_session(
     current_user: models.User = Depends(get_current_user),
 ):
     session = get_owned_session_or_404(db, session_id, current_user.id)
+    cleanup = teardown_session_environment(
+        session,
+        reason="session_end",
+        include_derived=True,
+        clear_runtime=True,
+    )
     session.status = "completed"
     session.end_time = datetime.now(timezone.utc)
 
     db.commit()
     logger.info(
-        "session_completed user_id=%s session_id=%s",
+        "session_completed user_id=%s session_id=%s cleanup_status=%s",
         current_user.id,
         session.id,
+        cleanup["status"],
     )
 
-    return {"status": "Session ended"}
+    return {
+        "status": "Session ended",
+        "session": session,
+        "cleanup": cleanup,
+    }

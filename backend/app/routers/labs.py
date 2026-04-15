@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from app import models
 from app.dependencies import get_current_user, get_db, get_owned_session_or_404
 from app.labs.labs_config import LABS
+from app.services.lab_cleanup import teardown_session_environment
 from app.services.lab_service import start_lab, stop_lab
-from app.services.lab_launcher import launch_lab
+from app.services.lab_launcher import check_docker_runtime, launch_lab
 
 router = APIRouter(prefix="/labs", tags=["Labs"])
 logger = logging.getLogger("securestack.labs")
@@ -27,7 +28,14 @@ def stop(current_user: models.User = Depends(get_current_user)):
 
 @router.get("/status")
 def status():
-    return {"status": "running (manual check for now)"}
+    docker_ready, docker_detail = check_docker_runtime()
+    return {
+        "status": "ready" if docker_ready else "degraded",
+        "docker_runtime": {
+            "status": "ok" if docker_ready else "error",
+            "detail": docker_detail,
+        },
+    }
 
 
 @router.get("/definition/{lab_id}")
@@ -47,6 +55,7 @@ def get_lab_definition(lab_id: str):
         "prerequisites": lab.get("prerequisites", []),
         "required_tools": lab.get("required_tools", []),
         "success_criteria": lab.get("success_criteria", []),
+        "topology": lab.get("topology"),
         "student_manual_path": lab.get("student_manual_path"),
         "instructor_guide_path": lab.get("instructor_guide_path"),
         "tasks": lab.get("tasks", []),
@@ -61,6 +70,11 @@ def launch_lab_route(
 ):
     try:
         session = get_owned_session_or_404(db, session_id, current_user.id)
+        if session.status == "completed" or session.end_time:
+            raise HTTPException(
+                status_code=400,
+                detail="Completed sessions cannot launch a new environment. Start a new session instead.",
+            )
         result = launch_lab(session_id, lab_id)
         if session:
             session.environment_launched_at = datetime.now(timezone.utc)
@@ -81,6 +95,8 @@ def launch_lab_route(
         return result
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "environment_launch_failed user_id=%s session_id=%s lab_id=%s",
@@ -92,3 +108,29 @@ def launch_lab_route(
             status_code=500,
             detail="Failed to launch lab environment",
         )
+
+
+@router.post("/teardown/{session_id}")
+def teardown_lab_route(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    session = get_owned_session_or_404(db, session_id, current_user.id)
+    cleanup = teardown_session_environment(
+        session,
+        reason="manual_teardown",
+        include_derived=True,
+        clear_runtime=True,
+    )
+    db.commit()
+    logger.info(
+        "environment_torn_down user_id=%s session_id=%s status=%s removed=%s missing=%s errors=%s",
+        current_user.id,
+        session_id,
+        cleanup["status"],
+        cleanup["removed_count"],
+        cleanup["missing_count"],
+        cleanup["error_count"],
+    )
+    return cleanup

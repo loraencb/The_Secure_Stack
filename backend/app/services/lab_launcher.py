@@ -3,16 +3,18 @@ import time
 
 import docker
 import requests
+from docker.types import IPAMConfig, IPAMPool
 
 from app.config import settings
 from app.labs.labs_config import LABS
+from app.services.lab_resources import build_managed_labels
 
 import logging
 
 logger = logging.getLogger("securestack.lab_launcher")
 
 
-def get_docker_client():
+def get_docker_client(log_failure: bool = True):
     try:
         if settings.docker_host:
             client = docker.DockerClient(base_url=settings.docker_host)
@@ -21,22 +23,73 @@ def get_docker_client():
         client.ping()
         return client
     except docker.errors.DockerException as exc:
-        logger.exception("docker_unavailable host=%s", settings.docker_host or "from_env")
+        if log_failure:
+            logger.exception(
+                "docker_unavailable host=%s",
+                settings.docker_host or "from_env",
+            )
         raise RuntimeError(
             "Docker is unavailable. Ensure the Docker daemon is running and the backend can access the Docker socket."
         ) from exc
 
 
-def get_or_create_network(name: str):
-    client = get_docker_client()
+def check_docker_runtime() -> tuple[bool, str]:
+    try:
+        client = get_docker_client(log_failure=False)
+    except RuntimeError as exc:
+        return False, str(exc)
+
+    client.close()
+    return True, "ok"
+
+
+def iter_lab_network_subnets(session_id: int, attempts: int = 16):
+    session_slot = max(session_id - 1, 0) % (64 * 256)
+    for offset in range(max(attempts, 1)):
+        candidate = (session_slot + offset) % (64 * 256)
+        second_octet = 64 + (candidate // 256)
+        third_octet = candidate % 256
+        yield f"10.{second_octet}.{third_octet}.0/24"
+
+
+def get_or_create_network(client, name: str, session_id: int, lab_id: str):
     try:
         return client.networks.get(name)
     except docker.errors.NotFound:
-        return client.networks.create(name, driver="bridge")
+        last_error = None
+        for subnet in iter_lab_network_subnets(session_id):
+            try:
+                logger.info(
+                    "lab_network_create_attempt name=%s session_id=%s subnet=%s",
+                    name,
+                    session_id,
+                    subnet,
+                )
+                ipam_config = IPAMConfig(pool_configs=[IPAMPool(subnet=subnet)])
+                return client.networks.create(
+                    name,
+                    driver="bridge",
+                    ipam=ipam_config,
+                    labels=build_managed_labels(session_id, lab_id, "network"),
+                )
+            except docker.errors.APIError as exc:
+                last_error = exc
+                logger.warning(
+                    "lab_network_create_retry name=%s session_id=%s subnet=%s error=%s",
+                    name,
+                    session_id,
+                    subnet,
+                    exc,
+                )
+
+        raise RuntimeError(
+            f"Unable to allocate a lab network for session {session_id} after multiple subnet attempts."
+        ) from last_error
 
 
-def safe_remove_container(name: str):
-    client = get_docker_client()
+def safe_remove_container(name: str, client=None):
+    owns_client = client is None
+    client = client or get_docker_client()
     try:
         container = client.containers.get(name)
         container.reload()
@@ -45,10 +98,14 @@ def safe_remove_container(name: str):
         container.remove(force=True)
     except docker.errors.NotFound:
         pass
+    finally:
+        if owns_client:
+            client.close()
 
 
-def safe_remove_network(name: str):
-    client = get_docker_client()
+def safe_remove_network(name: str, client=None):
+    owns_client = client is None
+    client = client or get_docker_client()
     try:
         network = client.networks.get(name)
         network.remove()
@@ -56,6 +113,9 @@ def safe_remove_network(name: str):
         pass
     except docker.errors.APIError:
         pass
+    finally:
+        if owns_client:
+            client.close()
 
 
 def wait_for_http_service(browser_url: str, timeout: float = 60.0):
@@ -105,22 +165,32 @@ def launch_lab(session_id: int, lab_id: str):
         session_id=session_id
     )
 
-    safe_remove_container(attacker_name)
-    safe_remove_container(target_name)
-    safe_remove_network(network_name)
-
-    network = get_or_create_network(network_name)
-    container_limits = build_container_limits()
+    logger.info(
+        "lab_launch_start session_id=%s lab_id=%s attacker=%s target=%s network=%s",
+        session_id,
+        lab_id,
+        attacker_name,
+        target_name,
+        network_name,
+    )
 
     target = None
     attacker = None
 
     try:
+        safe_remove_container(attacker_name, client=client)
+        safe_remove_container(target_name, client=client)
+        safe_remove_network(network_name, client=client)
+
+        network = get_or_create_network(client, network_name, session_id, lab_id)
+        container_limits = build_container_limits()
+
         target = client.containers.create(
             lab["target"]["image"],
             name=target_name,
             detach=True,
             ports=lab["target"].get("ports"),
+            labels=build_managed_labels(session_id, lab_id, "target_container"),
             **container_limits,
         )
         network.connect(target, aliases=[lab["target"]["alias"]])
@@ -133,6 +203,7 @@ def launch_lab(session_id: int, lab_id: str):
             detach=True,
             tty=True,
             stdin_open=True,
+            labels=build_managed_labels(session_id, lab_id, "attacker_container"),
             **container_limits,
         )
         network.connect(attacker)
@@ -188,11 +259,21 @@ def launch_lab(session_id: int, lab_id: str):
         }
 
     except Exception as exc:
+        logger.exception(
+            "lab_launch_failure session_id=%s lab_id=%s attacker=%s target=%s network=%s",
+            session_id,
+            lab_id,
+            attacker_name,
+            target_name,
+            network_name,
+        )
         if attacker:
-            safe_remove_container(attacker_name)
+            safe_remove_container(attacker_name, client=client)
         if target:
-            safe_remove_container(target_name)
-        safe_remove_network(network_name)
+            safe_remove_container(target_name, client=client)
+        safe_remove_network(network_name, client=client)
         raise RuntimeError(
             f"Failed to launch lab '{lab_id}' for session {session_id}: {exc}"
         ) from exc
+    finally:
+        client.close()

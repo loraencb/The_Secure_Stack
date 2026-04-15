@@ -11,7 +11,7 @@ router = APIRouter(prefix="/findings", tags=["Findings"])
 logger = logging.getLogger("securestack.findings")
 
 
-@router.post("/", response_model=schemas.FindingResponse)
+@router.post("", response_model=schemas.FindingResponse)
 def create_finding(
     finding: schemas.FindingCreate,
     db: Session = Depends(get_db),

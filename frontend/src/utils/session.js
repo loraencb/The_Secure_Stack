@@ -82,6 +82,47 @@ export function mergeLabSteps(definitionTasks = [], runtimeSteps = []) {
   }));
 }
 
+function extractTargetPort(browserUrl) {
+  if (!browserUrl || typeof browserUrl !== "string") {
+    return "";
+  }
+
+  const segments = browserUrl.split(":");
+  return segments.length > 2 ? segments[segments.length - 1].replace(/\/$/, "") : "";
+}
+
+function resolveRuntimeStepText(value, browserUrl) {
+  if (typeof value !== "string" || !value.includes("{target_port}")) {
+    return value;
+  }
+
+  const targetPort = extractTargetPort(browserUrl);
+  if (!targetPort) {
+    return value;
+  }
+
+  return value.replaceAll("{target_port}", targetPort);
+}
+
+export function hydrateRuntimeLabSteps(steps = [], runtimeInfo = null) {
+  const browserUrl = runtimeInfo?.browser_url;
+  if (!browserUrl) {
+    return steps;
+  }
+
+  return steps.map((step) => ({
+    ...step,
+    instruction: resolveRuntimeStepText(step.instruction, browserUrl),
+    expected_outcome: resolveRuntimeStepText(step.expected_outcome, browserUrl),
+    command_hint: resolveRuntimeStepText(step.command_hint, browserUrl),
+    hint_text: resolveRuntimeStepText(step.hint_text, browserUrl),
+    remediation_text: resolveRuntimeStepText(step.remediation_text, browserUrl),
+    hints: Array.isArray(step.hints)
+      ? step.hints.map((hint) => resolveRuntimeStepText(hint, browserUrl))
+      : step.hints,
+  }));
+}
+
 export function buildTaskProgressMap(records = []) {
   return records.reduce((accumulator, record) => {
     if (record?.task_id) {

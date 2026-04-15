@@ -146,6 +146,7 @@ function getPersistedCommandInsights(taskProgress = {}) {
 
 function getWorkflowStatus({
   sessionId,
+  sessionCompleted,
   environmentLaunched,
   hasCommandActivity,
   hasFindings,
@@ -161,21 +162,30 @@ function getWorkflowStatus({
     };
   }
 
-  if (!environmentLaunched) {
-    return {
-      label: "Waiting for launch",
-      tone: "sky",
-      detail:
-        "The session is active, but the attacker and target environment still needs to be launched.",
-    };
-  }
-
   if (reportGenerated) {
     return {
       label: "Report ready",
       tone: "success",
       detail:
         "The workflow has reached the reporting stage and the session summary is available.",
+    };
+  }
+
+  if (sessionCompleted) {
+    return {
+      label: "Session completed",
+      tone: "muted",
+      detail:
+        "The lab environment has been cleaned up. Review saved evidence, reopen reports, or start a fresh session when you are ready.",
+    };
+  }
+
+  if (!environmentLaunched) {
+    return {
+      label: "Waiting for launch",
+      tone: "sky",
+      detail:
+        "The session is active, but the attacker and target environment still needs to be launched.",
     };
   }
 
@@ -277,6 +287,7 @@ function getReportReadiness({
 function getNextRecommendation({
   sessionId,
   workflowState,
+  sessionCompleted,
   environmentLaunched,
   hasCommandActivity,
   hasFindings,
@@ -295,6 +306,56 @@ function getNextRecommendation({
       description:
         "Start a session to unlock the lab guide, workspace, and reporting flow.",
       reason: "No active session exists yet.",
+    };
+  }
+
+  if (sessionCompleted) {
+    if (reportGenerated) {
+      return {
+        key: "review_report",
+        label: "Review Report",
+        targetSection: "reports",
+        tone: "success",
+        description:
+          "This session has been completed and the environment was cleaned up. Review the final report and saved evidence.",
+        reason: "Completed sessions stay available for review even after the lab runtime is removed.",
+      };
+    }
+
+    if (hasFindings) {
+      if (reportReadiness?.key === "needs_evidence_context") {
+        return {
+          key: "review_evidence",
+          label: "Review Evidence",
+          targetSection: "reports",
+          tone: "warning",
+          description:
+            "This session is complete, but the saved findings still need clearer evidence context before the report feels finished.",
+          reason:
+            "The runtime is gone, so this session is now best used as a review and reporting space.",
+        };
+      }
+
+      return {
+        key: "generate_report",
+        label: "Generate Report",
+        targetSection: "reports",
+        tone: "success",
+        description:
+          "The environment has been cleaned up, but your saved findings are still available. Generate the report to finalize the investigation.",
+        reason: "Completed sessions can still be synthesized into a durable report.",
+      };
+    }
+
+    return {
+      key: "start_session",
+      label: "Start Session",
+      targetSection: "overview",
+      tone: "muted",
+      description:
+        "This session has already been ended and the environment was cleaned up. Start a fresh session when you are ready to launch a new lab.",
+      reason:
+        "Completed sessions stay available for review, but they do not reopen a live environment.",
     };
   }
 
@@ -448,12 +509,16 @@ function getNextRecommendation({
 function buildWorkflowMilestones({
   sessionId,
   workflowState,
+  sessionCompleted,
   environmentLaunched,
   hasFindings,
   reportGenerated,
 }) {
   const guideReviewed = workflowState.visitedSections.includes("guide");
   const hasCommandActivity = workflowState.commandsRunCount > 0;
+  const environmentMilestoneComplete =
+    environmentLaunched ||
+    (sessionCompleted && (hasCommandActivity || hasFindings || reportGenerated));
 
   return [
     {
@@ -475,9 +540,11 @@ function buildWorkflowMilestones({
     {
       key: "environment",
       label: "Environment launched",
-      complete: environmentLaunched,
+      complete: environmentMilestoneComplete,
       detail: environmentLaunched
         ? "The attacker and target environment is live."
+        : sessionCompleted
+        ? "The environment was launched during the session and has since been cleaned up."
         : "Launch the environment from the workspace.",
     },
     {
@@ -595,6 +662,9 @@ export function getSessionWorkflow({
       sessionRecord?.environment_launched_at ||
       normalizedState.environmentLaunchedAt
   );
+  const sessionCompleted = Boolean(
+    sessionRecord?.status === "completed" || sessionRecord?.end_time
+  );
   const hasFindings = findings.length > 0;
   const reportGenerated = Boolean(
     report || sessionRecord?.report_generated_at || normalizedState.reportGeneratedAt
@@ -633,6 +703,7 @@ export function getSessionWorkflow({
   const nextRecommendation = getNextRecommendation({
     sessionId,
     workflowState: normalizedState,
+    sessionCompleted,
     environmentLaunched,
     hasCommandActivity,
     hasFindings,
@@ -656,6 +727,7 @@ export function getSessionWorkflow({
       ...normalizedState,
       commandsRunCount,
     },
+    sessionCompleted,
     environmentLaunched,
     hasFindings,
     reportGenerated,
@@ -669,6 +741,7 @@ export function getSessionWorkflow({
       : 0;
   const status = getWorkflowStatus({
     sessionId,
+    sessionCompleted,
     environmentLaunched,
     hasCommandActivity,
     hasFindings,
@@ -686,6 +759,7 @@ export function getSessionWorkflow({
     lastCommandAt:
       normalizedState.lastCommandAt || persistedLastCommandAt,
     lastFeedbackAt: normalizedState.lastFeedbackAt,
+    sessionCompleted,
     environmentLaunched,
     hasFindings,
     findingsCount: findings.length,

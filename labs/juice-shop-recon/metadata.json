@@ -27,6 +27,32 @@
     "The learner identifies that port 3000 is open on the target.",
     "The learner captures evidence that the exposed service is the Juice Shop web application."
   ],
+  "topology": {
+    "summary": "A single attacker container investigates one exposed Juice Shop target across an isolated lab network.",
+    "nodes": [
+      {
+        "id": "attacker",
+        "label": "Attacker shell",
+        "role": "attacker",
+        "kind": "container",
+        "details": "Use this container to run recon commands and collect evidence."
+      },
+      {
+        "id": "target",
+        "label": "Juice Shop target",
+        "role": "target",
+        "kind": "web-application",
+        "details": "The target hosts the OWASP Juice Shop application on TCP 3000."
+      }
+    ],
+    "connections": [
+      {
+        "from": "attacker",
+        "to": "target",
+        "label": "HTTP and network recon path"
+      }
+    ]
+  },
   "manuals": {
     "student": "student_manual.md",
     "instructor": "instructor_guide.md"
@@ -54,10 +80,16 @@
       "step_type": "command",
       "objective": "Confirm that the attacker container can resolve and reach the target host.",
       "instruction": "Confirm the attacker can reach the target container.",
+      "explanation": "This opening step proves the attacker container can resolve the target alias and send traffic across the isolated lab network before you spend time on deeper enumeration.",
+      "expected_outcome": "You should see successful ICMP replies and zero packet loss, confirming the target is reachable from the attacker shell.",
       "command_hint": "ping -c 3 target",
       "expected_evidence": [
         "icmp_seq",
         "0% packet loss"
+      ],
+      "hints": [
+        "Use the `target` hostname from the attacker shell instead of an IP address.",
+        "If name resolution fails, confirm the lab environment launched and the containers joined the isolated network."
       ],
       "allowed_completion_methods": [
         "command_match"
@@ -75,10 +107,16 @@
       "step_type": "command",
       "objective": "Enumerate exposed services and capture evidence of the reachable service.",
       "instruction": "Scan the target to discover open ports and services.",
+      "explanation": "Service enumeration turns basic reachability into actionable recon by revealing which ports and applications are actually exposed on the target.",
+      "expected_outcome": "The scan should identify TCP 3000 as open and provide enough service detail to justify deeper web validation.",
       "command_hint": "nmap -sV target",
       "expected_evidence": [
         "3000/tcp open",
         "service fingerprint"
+      ],
+      "hints": [
+        "Use version detection so the output is useful when you write up evidence later.",
+        "If the service is still starting, wait briefly and rerun the scan rather than assuming the host is down."
       ],
       "allowed_completion_methods": [
         "command_match",
@@ -97,10 +135,16 @@
       "step_type": "command",
       "objective": "Validate that the exposed service is a reachable web application.",
       "instruction": "Fetch the application response from the target.",
+      "explanation": "After identifying the open port, you want application-layer evidence that the service is really Juice Shop and not just a generic open listener.",
+      "expected_outcome": "The HTTP response should confirm the service is the OWASP Juice Shop application and give you report-ready evidence from the response body or headers.",
       "command_hint": "curl http://target:3000",
       "expected_evidence": [
         "HTTP/1.1 200 OK",
         "OWASP Juice Shop"
+      ],
+      "hints": [
+        "Capture enough of the response to prove what application is listening on port 3000.",
+        "If the response is empty, revisit the scan results and confirm the target service finished booting."
       ],
       "allowed_completion_methods": [
         "command_match",
@@ -119,9 +163,15 @@
       "step_type": "browser",
       "objective": "Confirm the learner can reach the exposed application in a browser.",
       "instruction": "Open the target in your browser.",
+      "explanation": "This final confirmation step connects the command-line evidence to the actual learner experience of reaching the exposed application through the forwarded browser URL.",
+      "expected_outcome": "The Juice Shop interface should load in a browser, confirming that the exposed application is reachable outside the attacker shell as well.",
       "command_hint": "http://localhost:{target_port}",
       "expected_evidence": [
         "Juice Shop UI loads in the browser"
+      ],
+      "hints": [
+        "Use the browser URL returned by the launcher rather than guessing the host port.",
+        "If the page fails to load, confirm the target container is still running and the forwarded port remains published."
       ],
       "allowed_completion_methods": [
         "manual_confirmation"

@@ -10,3 +10,8 @@ dist/
 # Environment files
 .env
 .venv
+
+# Generated logs and local validation artifacts
+*.log
+*.db
+*.db-journal

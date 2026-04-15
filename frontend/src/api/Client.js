@@ -118,8 +118,22 @@ export async function getSessionHistory() {
   return parseJsonResponse(res);
 }
 
+export async function endSession(sessionId) {
+  const res = await apiFetch(`/sessions/end/${sessionId}`, {
+    method: "POST",
+  });
+  return parseJsonResponse(res);
+}
+
 export async function launchLab(sessionId, labId) {
   const res = await apiFetch(`/labs/launch/${sessionId}/${labId}`, {
+    method: "POST",
+  });
+  return parseJsonResponse(res);
+}
+
+export async function teardownLab(sessionId) {
+  const res = await apiFetch(`/labs/teardown/${sessionId}`, {
     method: "POST",
   });
   return parseJsonResponse(res);

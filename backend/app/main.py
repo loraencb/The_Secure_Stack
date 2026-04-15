@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.bootstrap import bootstrap_application
 from app.config import settings
+from app.database import check_database_health
 from app.logging_config import configure_logging
 from app.routers import (
     auth,
@@ -16,11 +17,12 @@ from app.routers import (
     ws_terminal,
     task_progress,
 )
+from app.services.lab_launcher import check_docker_runtime
 
 configure_logging()
 logger = logging.getLogger("securestack.api")
 bootstrap_application()
-app = FastAPI()
+app = FastAPI(title="Secure Stack API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,7 +48,36 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "environment": settings.app_env}
+
+
+@app.get("/health/ready")
+def ready():
+    database_ok, database_detail = check_database_health()
+    docker_ok, docker_detail = check_docker_runtime()
+
+    checks = {
+        "database": {
+            "status": "ok" if database_ok else "error",
+            "detail": database_detail,
+        },
+        "docker_runtime": {
+            "status": "ok" if docker_ok else "error",
+            "detail": docker_detail,
+        },
+    }
+
+    if database_ok and docker_ok:
+        return {"status": "ok", "checks": checks}
+
+    logger.warning("readiness_check_failed checks=%s", checks)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "degraded",
+            "checks": checks,
+        },
+    )
 
 
 @app.exception_handler(RequestValidationError)

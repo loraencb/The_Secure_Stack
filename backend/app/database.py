@@ -1,6 +1,9 @@
 import logging
 import time
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,6 +16,13 @@ logger = logging.getLogger("securestack.database")
 
 DATABASE_URL = settings.database_url
 database_backend = make_url(DATABASE_URL).get_backend_name()
+REQUIRED_TABLES = {
+    "users",
+    "auth_tokens",
+    "sessions",
+    "findings",
+    "task_completions",
+}
 
 engine_kwargs = {
     "pool_pre_ping": True,
@@ -35,71 +45,25 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
 
-def ensure_table_columns(table_name: str, expected_columns: dict[str, str]):
-    with engine.begin() as connection:
+def ensure_model_metadata_loaded():
+    from app import models  # noqa: F401
+
+
+def get_alembic_config() -> Config:
+    backend_root = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option(
+        "script_location",
+        str(backend_root / "alembic").replace("%", "%%"),
+    )
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
+    return config
+
+
+def get_existing_table_names() -> set[str]:
+    with engine.connect() as connection:
         inspector = inspect(connection)
-        table_names = set(inspector.get_table_names())
-
-        if table_name not in table_names:
-            return
-
-        existing_columns = {
-            column["name"] for column in inspector.get_columns(table_name)
-        }
-
-        for column_name, column_type in expected_columns.items():
-            if column_name in existing_columns:
-                continue
-
-            connection.execute(
-                text(
-                    f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
-                )
-            )
-
-
-def ensure_session_columns():
-    ensure_table_columns(
-        "sessions",
-        {
-            "user_id": "INTEGER",
-            "lab_id": "VARCHAR",
-            "environment_launched_at": "DATETIME",
-            "attacker_container": "VARCHAR",
-            "target_container": "VARCHAR",
-            "network_name": "VARCHAR",
-            "browser_url": "VARCHAR",
-            "report_generated_at": "DATETIME",
-        },
-    )
-
-
-def ensure_finding_columns():
-    ensure_table_columns(
-        "findings",
-        {
-            "user_id": "INTEGER",
-            "source": "VARCHAR",
-            "task_id": "VARCHAR",
-            "task_label": "VARCHAR",
-            "task_objective": "TEXT",
-            "evidence_command": "TEXT",
-            "evidence_snapshot": "TEXT",
-            "created_at": "DATETIME",
-        },
-    )
-
-
-def ensure_task_completion_columns():
-    ensure_table_columns(
-        "task_completions",
-        {
-            "ai_status": "VARCHAR",
-            "ai_feedback": "TEXT",
-            "ai_confidence": "VARCHAR",
-            "evidence_quality": "VARCHAR",
-        },
-    )
+        return set(inspector.get_table_names())
 
 
 def wait_for_database():
@@ -129,9 +93,68 @@ def wait_for_database():
     ) from last_error
 
 
+def check_database_health() -> tuple[bool, str]:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True, "ok"
+    except SQLAlchemyError as exc:
+        return False, str(exc)
+
+
+def run_database_migrations():
+    command.upgrade(get_alembic_config(), "head")
+    logger.info("database_migrations_applied backend=%s", database_backend)
+
+
+def stamp_database_head():
+    command.stamp(get_alembic_config(), "head")
+    logger.info("database_schema_stamped backend=%s", database_backend)
+
+
+def create_schema_fallback():
+    ensure_model_metadata_loaded()
+    existing_tables = get_existing_table_names() - {"alembic_version"}
+    if existing_tables:
+        raise RuntimeError(
+            "SECURESTACK_AUTO_CREATE_SCHEMA is only safe for an empty database. "
+            "Run `alembic upgrade head` for existing databases."
+        )
+
+    Base.metadata.create_all(bind=engine)
+    stamp_database_head()
+    logger.info("database_schema_created_via_fallback backend=%s", database_backend)
+
+
+def verify_database_schema():
+    existing_tables = get_existing_table_names()
+    missing_tables = sorted(REQUIRED_TABLES - existing_tables)
+
+    if missing_tables:
+        raise RuntimeError(
+            "Database schema is incomplete. Missing tables: "
+            f"{', '.join(missing_tables)}. Run `alembic upgrade head`."
+        )
+
+    if "alembic_version" not in existing_tables:
+        logger.warning(
+            "database_schema_untracked_by_alembic backend=%s action=stamp_head_recommended",
+            database_backend,
+        )
+
+
 def initialize_database():
     wait_for_database()
-    Base.metadata.create_all(bind=engine)
-    ensure_session_columns()
-    ensure_finding_columns()
-    ensure_task_completion_columns()
+
+    if settings.run_migrations_on_startup:
+        run_database_migrations()
+    elif settings.auto_create_schema:
+        create_schema_fallback()
+
+    verify_database_schema()
+    logger.info(
+        "database_initialized backend=%s migrations_on_startup=%s auto_create_schema=%s",
+        database_backend,
+        settings.run_migrations_on_startup,
+        settings.auto_create_schema,
+    )

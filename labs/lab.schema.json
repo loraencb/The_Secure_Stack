@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://securestack.local/schemas/lab.schema.json",
+  "title": "Secure Stack Lab Metadata",
+  "description": "Authoring schema for Secure Stack lab definitions.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "lab_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Backward-compatible alias for lab_id."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Backward-compatible alias for name."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "difficulty": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "estimated_duration_minutes": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "learning_objectives": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "objectives": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Backward-compatible alias for learning_objectives."
+    },
+    "prerequisites": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "success_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "manuals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "student": {
+          "type": "string"
+        },
+        "instructor": {
+          "type": "string"
+        }
+      }
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "topology": {
+      "$ref": "#/$defs/topology"
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/task"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/task"
+      },
+      "description": "Backward-compatible alias for tasks."
+    }
+  },
+  "required": [
+    "description",
+    "runtime"
+  ],
+  "allOf": [
+    {
+      "anyOf": [
+        {
+          "required": [
+            "lab_id"
+          ]
+        },
+        {
+          "required": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "anyOf": [
+        {
+          "required": [
+            "name"
+          ]
+        },
+        {
+          "required": [
+            "title"
+          ]
+        }
+      ]
+    },
+    {
+      "anyOf": [
+        {
+          "required": [
+            "tasks"
+          ]
+        },
+        {
+          "required": [
+            "steps"
+          ]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "runtime": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "attacker",
+        "target"
+      ],
+      "properties": {
+        "attacker": {
+          "$ref": "#/$defs/runtimeContainer"
+        },
+        "target": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/runtimeContainer"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "app_port": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "alias": {
+                  "type": "string"
+                },
+                "ports": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "network_name": {
+          "type": "string"
+        }
+      }
+    },
+    "runtimeContainer": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "container_name": {
+          "type": "string"
+        }
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/topologyNode"
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/topologyConnection"
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/topologyConnection"
+          }
+        }
+      }
+    },
+    "topologyNode": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "topologyConnection": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "step_type": {
+          "type": "string",
+          "enum": [
+            "command",
+            "browser"
+          ]
+        },
+        "objective": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "expected_outcome": {
+          "type": "string"
+        },
+        "command_hint": {
+          "type": "string"
+        },
+        "hint_text": {
+          "type": "string"
+        },
+        "hints": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "expected_evidence": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "success_criteria": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "remediation_text": {
+          "type": "string"
+        },
+        "allowed_completion_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "command_match",
+              "evidence_match",
+              "manual_confirmation"
+            ]
+          }
+        },
+        "manual_confirmation_label": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

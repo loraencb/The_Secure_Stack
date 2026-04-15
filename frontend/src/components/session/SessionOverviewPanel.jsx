@@ -16,6 +16,9 @@ export default function SessionOverviewPanel() {
   } = useSecureStack();
   const runtimeReady = workflow.environmentLaunched;
   const runtimeInfo = labInfo;
+  const sessionCompleted = Boolean(
+    sessionRecord?.status === "completed" || sessionRecord?.end_time
+  );
 
   return (
     <div className="page-stack">
@@ -111,7 +114,11 @@ export default function SessionOverviewPanel() {
               <h2>Runtime Status</h2>
             </div>
             <span className={badgeClass(runtimeReady ? "success" : "muted")}>
-              {runtimeReady ? "Launched" : "Waiting to launch"}
+              {runtimeReady
+                ? "Launched"
+                : sessionCompleted
+                ? "Cleaned up"
+                : "Waiting to launch"}
             </span>
           </div>
 
@@ -162,6 +169,28 @@ export default function SessionOverviewPanel() {
                     to={buildSessionPath(sessionId, "reports")}
                   >
                     Open Reports
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : sessionCompleted ? (
+            <div className="empty-card">
+              <div className="content-stack">
+                <strong>Environment cleaned up</strong>
+                <p>
+                  This session has been ended or the runtime was explicitly
+                  torn down. Review the saved evidence and reports, or start a
+                  new session when you need another live environment.
+                </p>
+                <div className="inline-actions">
+                  <Link
+                    className="button button--secondary"
+                    to={buildSessionPath(sessionId, "reports")}
+                  >
+                    Open Reports
+                  </Link>
+                  <Link className="button button--ghost" to="/profile">
+                    View History
                   </Link>
                 </div>
               </div>

@@ -1,0 +1,135 @@
+{
+  "schema_version": "2026-04",
+  "lab_id": "example-recon-lab",
+  "name": "Example Recon Lab",
+  "description": "A small example lab that shows the authoring format Secure Stack expects.",
+  "difficulty": "Beginner",
+  "category": "Network Reconnaissance",
+  "estimated_duration_minutes": 20,
+  "learning_objectives": [
+    "Confirm the attacker can reach the target.",
+    "Identify the exposed service on the target.",
+    "Capture evidence that supports a basic recon finding."
+  ],
+  "prerequisites": [
+    "Basic Linux terminal navigation",
+    "Familiarity with ICMP, TCP ports, and HTTP"
+  ],
+  "required_tools": [
+    "bash",
+    "ping",
+    "nmap",
+    "curl"
+  ],
+  "success_criteria": [
+    "The learner confirms reachability from the attacker shell.",
+    "The learner identifies the target's exposed web service."
+  ],
+  "manuals": {
+    "student": "student_manual.md",
+    "instructor": "instructor_guide.md"
+  },
+  "runtime": {
+    "attacker": {
+      "image": "securestack-attacker:latest",
+      "container_name": "attacker-{session_id}"
+    },
+    "target": {
+      "image": "bkimminich/juice-shop",
+      "container_name": "target-{session_id}",
+      "alias": "target",
+      "app_port": 3000,
+      "ports": {
+        "3000/tcp": null
+      }
+    },
+    "network_name": "lab-net-{session_id}"
+  },
+  "topology": {
+    "summary": "An attacker shell investigates one exposed web target on an isolated lab network.",
+    "nodes": [
+      {
+        "id": "attacker",
+        "label": "Attacker shell",
+        "role": "attacker",
+        "kind": "container",
+        "details": "Run recon commands and collect evidence here."
+      },
+      {
+        "id": "target",
+        "label": "Web target",
+        "role": "target",
+        "kind": "web-application",
+        "details": "Hosts the application you are validating."
+      }
+    ],
+    "connections": [
+      {
+        "from": "attacker",
+        "to": "target",
+        "label": "Recon path"
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "task_id": "verify-connectivity",
+      "title": "Verify connectivity",
+      "step_type": "command",
+      "objective": "Confirm the attacker shell can resolve and reach the target host.",
+      "instruction": "Confirm the attacker can reach the target host.",
+      "explanation": "Connectivity validation proves the isolated lab network is working before you spend time on deeper enumeration.",
+      "expected_outcome": "You should see successful replies and zero packet loss.",
+      "command_hint": "ping -c 3 target",
+      "expected_evidence": [
+        "icmp_seq",
+        "0% packet loss"
+      ],
+      "hints": [
+        "Use the target hostname instead of guessing an IP address."
+      ],
+      "allowed_completion_methods": [
+        "command_match"
+      ],
+      "remediation_text": "If ping fails, confirm the environment launched and the target alias is resolvable."
+    },
+    {
+      "task_id": "enumerate-service",
+      "title": "Identify the exposed service",
+      "step_type": "command",
+      "objective": "Discover the exposed service and capture report-ready evidence.",
+      "instruction": "Scan the target to identify open ports and services.",
+      "explanation": "Enumeration turns basic reachability into actionable evidence about the attack surface.",
+      "expected_outcome": "The scan should reveal the open service and enough detail to justify deeper validation.",
+      "command_hint": "nmap -sV target",
+      "expected_evidence": [
+        "open port",
+        "service fingerprint"
+      ],
+      "hints": [
+        "Use version detection so the output is useful later in the report."
+      ],
+      "allowed_completion_methods": [
+        "command_match",
+        "evidence_match"
+      ]
+    },
+    {
+      "task_id": "open-browser-view",
+      "title": "Open the application",
+      "step_type": "browser",
+      "objective": "Confirm the service is reachable through the forwarded browser URL.",
+      "instruction": "Open the target in your browser.",
+      "explanation": "This step links command-line evidence to the learner's actual browser experience.",
+      "expected_outcome": "The application loads in the browser.",
+      "command_hint": "http://localhost:{target_port}",
+      "hints": [
+        "Use the URL returned by the lab launcher instead of guessing the host port."
+      ],
+      "allowed_completion_methods": [
+        "manual_confirmation"
+      ],
+      "manual_confirmation_label": "Mark Browser Step Complete"
+    }
+  ]
+}

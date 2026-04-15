@@ -57,17 +57,24 @@ export default function SessionShell({
     activeLabConfig,
     activeLabDefinition,
     sessionId,
+    sessionRecord,
     message,
     clearMessage,
     sessionSyncing,
     sessionLoadError,
     startingSession,
     launchingLab,
+    tearingDownLab,
+    resettingLab,
+    endingSession,
     generatingReport,
     summary,
     workflow,
     startNewSession,
     launchActiveLab,
+    teardownActiveLab,
+    resetActiveLab,
+    endCurrentSession,
     generateSessionReport,
     recordVisitedSection,
   } = useSecureStack();
@@ -99,12 +106,40 @@ export default function SessionShell({
     }
   }
 
+  async function handleResetEnvironment() {
+    try {
+      await resetActiveLab();
+    } catch {
+      // Message state is handled in shared context.
+    }
+  }
+
+  async function handleTeardownEnvironment() {
+    try {
+      await teardownActiveLab();
+    } catch {
+      // Message state is handled in shared context.
+    }
+  }
+
+  async function handleEndSession() {
+    try {
+      await endCurrentSession();
+      navigate("/profile");
+    } catch {
+      // Message state is handled in shared context.
+    }
+  }
+
   const isSwitchingSession =
     Boolean(routeSessionId) && Boolean(sessionId) && routeSessionId !== sessionId;
   const isRouteLoading = Boolean(routeSessionId) && (sessionSyncing || isSwitchingSession);
   const currentSessionId = routeSessionId || sessionId;
   const currentSection = getSessionSectionFromPathname(location.pathname);
   const nextSection = getNextSessionSection(currentSection.slug);
+  const sessionCompleted = Boolean(
+    sessionRecord?.status === "completed" || sessionRecord?.end_time
+  );
   const recommendedSection = workflow.nextRecommendation?.targetSection
     ? getSessionSection(workflow.nextRecommendation.targetSection)
     : nextSection;
@@ -181,6 +216,9 @@ export default function SessionShell({
             <span className={badgeClass(sessionLoadError ? "danger" : "success")}>
               {sessionLoadError ? "Session error" : `Session #${currentSessionId || "?"}`}
             </span>
+            {sessionCompleted ? (
+              <span className={badgeClass("muted")}>Session completed</span>
+            ) : null}
             <span
               className={badgeClass(
                 workflow.environmentLaunched ? "success" : "muted"
@@ -188,6 +226,8 @@ export default function SessionShell({
             >
               {workflow.environmentLaunched
                 ? "Environment live"
+                : sessionCompleted
+                ? "Environment cleaned up"
                 : "Not launched"}
             </span>
             {summary.activeLabStep ? (
@@ -210,10 +250,34 @@ export default function SessionShell({
               type="button"
               className={launchButtonClass}
               onClick={handleLaunch}
-              disabled={!currentSessionId || launchingLab}
+              disabled={!currentSessionId || launchingLab || sessionCompleted}
             >
               {launchingLab ? "Launching..." : "Launch Environment"}
             </button>
+            {workflow.environmentLaunched && !sessionCompleted ? (
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={handleTeardownEnvironment}
+                disabled={!currentSessionId || tearingDownLab || resettingLab}
+              >
+                {tearingDownLab && !resettingLab
+                  ? "Cleaning up..."
+                  : "Clean Up Environment"}
+              </button>
+            ) : null}
+            {workflow.environmentLaunched && !sessionCompleted ? (
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={handleResetEnvironment}
+                disabled={!currentSessionId || resettingLab || tearingDownLab}
+              >
+                {resettingLab || tearingDownLab
+                  ? "Resetting..."
+                  : "Reset Environment"}
+              </button>
+            ) : null}
             <button
               type="button"
               className={reportButtonClass}
@@ -222,6 +286,16 @@ export default function SessionShell({
             >
               {generatingReport ? "Generating..." : "Generate Report"}
             </button>
+            {!sessionCompleted && currentSessionId ? (
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={handleEndSession}
+                disabled={endingSession}
+              >
+                {endingSession ? "Ending..." : "End Session"}
+              </button>
+            ) : null}
           </div>
         </div>
 
