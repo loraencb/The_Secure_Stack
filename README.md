@@ -30,6 +30,7 @@ The result is more than a lab launcher. It is a guided cyber investigation platf
 - Step-aware AI tutor with progressive hint escalation and explicit Ask Tutor actions.
 - Evidence-aware findings and report readiness cues.
 - Investigation timeline and durable session history.
+- Lightweight instructor review view for TA/professor session inspection.
 - Environment teardown and cleanup workflow for lab lifecycle safety.
 - Deployment-ready Docker Compose stack with frontend, backend, and PostgreSQL.
 
@@ -54,6 +55,7 @@ The frontend routes currently include:
 - `/session/:id/workspace`
 - `/session/:id/reports`
 - `/profile`
+- `/instructor` for allowlisted instructor accounts
 
 ### Workflow and Evidence Intelligence
 
@@ -90,6 +92,10 @@ The tutor currently supports:
 - off-track redirection
 - learning-oriented success explanations
 - explicit Ask Tutor actions for hint, explanation, stuck support, and next-step help
+- optional OpenAI-backed deep reasoning for richer explanation, stuck, and conceptual tutor questions
+
+OpenAI is used only on the backend and only for deeper tutor moments. Fast local tutor behavior still handles success reinforcement, redirects, browser handoffs, weak-attempt nudges, and simple check-ins.
+The current websocket flow keeps final tutor responses non-streaming and uses the existing tutor pending state while deeper responses are prepared.
 
 ### Authentication and Data Ownership
 
@@ -101,6 +107,7 @@ The platform now supports:
 - per-user session ownership
 - per-user finding and report isolation
 - protected terminal WebSocket access
+- optional allowlisted instructor review access via `SECURESTACK_INSTRUCTOR_EMAILS`
 
 ### Container-Based Lab Infrastructure
 
@@ -154,6 +161,7 @@ The frontend still keeps lightweight UI-only state when useful, but backend-back
 
 - terminal-aware coaching and summary support
 - configurable external AI service endpoint
+- optional OpenAI Responses API deep tutor layer
 - graceful degradation when AI is unavailable
 
 ## Repository Layout
@@ -258,6 +266,7 @@ cp .env.example .env
 - `POSTGRES_PASSWORD`
 - `SECURESTACK_DATABASE_URL`
 - `SECURESTACK_OLLAMA_URL` if you want live AI responses
+- `OPENAI_API_KEY` if you want OpenAI-backed deep tutor explanations
 
 3. Start the stack:
 
@@ -304,14 +313,20 @@ Common values include:
 - `SECURESTACK_AUTH_TOKEN_SECRET`
 - `SECURESTACK_CORS_ORIGINS`
 - `SECURESTACK_OLLAMA_URL`
+- `OPENAI_API_KEY` for backend-only deep tutor calls
+- `OPENAI_MODEL`, defaulting to `gpt-5.4-mini`
 - `SECURESTACK_TARGET_PUBLIC_HOST`
 - `SECURESTACK_TARGET_PROBE_HOST`
+- `SECURESTACK_PULL_RUNTIME_IMAGES`
 - Docker and runtime resource settings
+
+OpenAI keys must stay server-side. The frontend only receives tutor responses from the FastAPI websocket; it never receives `OPENAI_API_KEY`.
 
 `SECURESTACK_TARGET_PUBLIC_HOST` and `SECURESTACK_TARGET_PROBE_HOST` are especially important in Dockerized deployment:
 
 - the browser should open the target using `localhost`
 - the backend container should probe target readiness using `host.docker.internal`
+- `SECURESTACK_PULL_RUNTIME_IMAGES=1` lets Secure Stack automatically pull first-use lab images on launch; set it to `0` only if you preload every required lab image on the Docker host.
 
 See [.env.example](.env.example) and [DEPLOYMENT.md](DEPLOYMENT.md) for the supported values.
 

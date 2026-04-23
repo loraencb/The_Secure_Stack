@@ -61,43 +61,8 @@ export default function SessionSidebar({ visitedSections = [] }) {
             />
           </div>
           <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Visited sections</span>
-            <p>
-              {visitedSections.length} of {SESSION_SECTIONS.length} session
-              sections reviewed in this run.
-            </p>
-          </div>
-          <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Workflow state</span>
-            <p>{workflow.status.detail}</p>
-          </div>
-          <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Active lab</span>
-            <p>{activeLabDefinition?.name || activeLabConfig.name}</p>
-          </div>
-          <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Active task</span>
+            <span className="detail-label">Current focus</span>
             <p>{workflow.currentTaskLabel}</p>
-          </div>
-          <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Current section</span>
-            <p>
-              {currentSection.label} ({currentSection.phase})
-            </p>
-          </div>
-          <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">What this section is for</span>
-            <p>
-              {currentSection.description}
-            </p>
-          </div>
-          <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Recommended next section</span>
-            <p>
-              {recommendedSection
-                ? `${recommendedSection.label}: ${recommendedSection.description}`
-                : "Reports is the final review space for capturing evidence and generating the session summary."}
-            </p>
           </div>
           <div className="detail-box detail-box--tertiary">
             <span className="detail-label">What to do next</span>
@@ -107,16 +72,8 @@ export default function SessionSidebar({ visitedSections = [] }) {
             </p>
           </div>
           <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Live session activity</span>
-            <p>
-              {workflow.hasCommandActivity
-                ? `${workflow.commandsRunCount} commands captured${workflow.lastCommand ? `, latest: ${workflow.lastCommand}` : "."}`
-                : "No command activity captured yet."}
-            </p>
-          </div>
-          <div className="detail-box detail-box--tertiary">
-            <span className="detail-label">Evidence and report</span>
-            <p>{workflow.reportReadiness.detail}</p>
+            <span className="detail-label">Why this section matters</span>
+            <p>{currentSection.description}</p>
           </div>
           <div className="inline-actions">
             {previousSection ? (
@@ -134,6 +91,53 @@ export default function SessionSidebar({ visitedSections = [] }) {
               {navigationLabel}
             </Link>
           </div>
+
+          <details className="session-sidebar__details">
+            <summary>Session details</summary>
+            <div className="content-stack">
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Visited sections</span>
+                <p>
+                  {visitedSections.length} of {SESSION_SECTIONS.length} session
+                  sections reviewed in this run.
+                </p>
+              </div>
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Lab state</span>
+                <p>{workflow.status.detail}</p>
+              </div>
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Active lab</span>
+                <p>{activeLabDefinition?.name || activeLabConfig.name}</p>
+              </div>
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Current section</span>
+                <p>
+                  {currentSection.label} ({currentSection.phase})
+                </p>
+              </div>
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Recommended next section</span>
+                <p>
+                  {recommendedSection
+                    ? `${recommendedSection.label}: ${recommendedSection.description}`
+                    : "Reports is the final review space for capturing evidence and generating the session summary."}
+                </p>
+              </div>
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Live session activity</span>
+                <p>
+                  {workflow.hasCommandActivity
+                    ? `${workflow.commandsRunCount} commands captured${workflow.lastCommand ? `, latest: ${workflow.lastCommand}` : "."}`
+                    : "No command activity captured yet."}
+                </p>
+              </div>
+              <div className="detail-box detail-box--tertiary">
+                <span className="detail-label">Evidence and report</span>
+                <p>{workflow.reportReadiness.detail}</p>
+              </div>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -141,7 +145,7 @@ export default function SessionSidebar({ visitedSections = [] }) {
         <section className="surface-card">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">AI Finding</span>
+              <span className="eyebrow">Tutor Finding</span>
               <h2>Suggested Finding</h2>
             </div>
             <span

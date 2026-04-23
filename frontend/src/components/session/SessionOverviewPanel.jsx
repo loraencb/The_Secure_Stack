@@ -1,8 +1,60 @@
 import { Link } from "react-router-dom";
+import { SESSION_SECTIONS } from "../../config/sessionSections";
 import { useSecureStack } from "../../context/SecureStackContext";
 import { buildSessionPath } from "../../utils/routes";
 import { getEvidencePreview } from "../../utils/session";
-import { badgeClass } from "./sessionUi";
+import { getSectionNavigationLabel } from "../../utils/workflow";
+
+function getOrientationGoals(activeLabDefinition, workflow) {
+  const authoredGoals = activeLabDefinition?.learning_objectives?.length
+    ? activeLabDefinition.learning_objectives
+    : activeLabDefinition?.success_criteria?.length
+    ? activeLabDefinition.success_criteria
+    : [];
+
+  if (authoredGoals.length) {
+    return authoredGoals.slice(0, 4);
+  }
+
+  return [
+    workflow.currentTaskObjective || "Understand the active lab objective.",
+    "Follow the guide so you know what evidence to look for.",
+    "Validate the lab steps in the workspace before writing them up.",
+  ].filter(Boolean);
+}
+
+function getNextSectionSlug(workflow, sessionCompleted, runtimeReady) {
+  const targetSection = workflow.nextRecommendation?.targetSection || "";
+  if (targetSection && targetSection !== "overview") {
+    return targetSection;
+  }
+
+  if (sessionCompleted) {
+    return "reports";
+  }
+
+  if (runtimeReady) {
+    return "workspace";
+  }
+
+  return "guide";
+}
+
+function getPathStatus(sectionSlug, nextSectionSlug, visitedSections) {
+  if (sectionSlug === "overview") {
+    return "You are here";
+  }
+
+  if (sectionSlug === nextSectionSlug) {
+    return "Next";
+  }
+
+  if (visitedSections.has(sectionSlug)) {
+    return "Visited";
+  }
+
+  return "";
+}
 
 export default function SessionOverviewPanel() {
   const {
@@ -15,402 +67,193 @@ export default function SessionOverviewPanel() {
     workflow,
   } = useSecureStack();
   const runtimeReady = workflow.environmentLaunched;
-  const runtimeInfo = labInfo;
   const sessionCompleted = Boolean(
     sessionRecord?.status === "completed" || sessionRecord?.end_time
   );
+  const nextSectionSlug = getNextSectionSlug(
+    workflow,
+    sessionCompleted,
+    runtimeReady
+  );
+  const primaryActionLabel = sessionCompleted
+    ? "Open Reports"
+    : getSectionNavigationLabel(nextSectionSlug);
+  const primaryActionHref = sessionId
+    ? buildSessionPath(sessionId, nextSectionSlug)
+    : "/labs";
+  const visitedSections = new Set(workflow.visitedSections || []);
+  const labDescription =
+    activeLabDefinition?.description ||
+    activeLabConfig.description ||
+    "Read the guide, validate the steps in the workspace, and capture the strongest evidence in reports.";
+  const orientationGoals = getOrientationGoals(activeLabDefinition, workflow);
+  const activityEntries = workflow.timeline.entries.slice(0, 6);
+  const supportSummary = activityEntries.length
+    ? `${workflow.timeline.entryCount} activity events`
+    : summary.compactEvidenceSummary.length
+    ? `${summary.compactEvidenceSummary.length} saved evidence notes`
+    : runtimeReady
+    ? "Environment details available"
+    : "Hidden by default";
+  const sessionStateCopy = sessionCompleted
+    ? "This session is in review mode. Use reports to review the strongest evidence."
+    : runtimeReady
+    ? "The live environment is available when you are ready to validate the next step."
+    : "The environment has not been launched yet. Start with the guide, then move into the workspace.";
 
   return (
-    <div className="page-stack">
-      <section className="panel-grid panel-grid--double">
-        <article className="surface-card overview-panel overview-panel--primary">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Overview</span>
-              <h2>Session Pulse</h2>
-            </div>
-            <span className={badgeClass("info")}>
-              {summary.completedSteps.length}/{summary.totalSteps} tasks complete
-            </span>
+    <div className="overview-orientation">
+      <section className="overview-orientation__hero">
+        <div className="content-stack">
+          <div>
+            <span className="eyebrow">Lab Orientation</span>
+            <h1>{activeLabDefinition?.name || activeLabConfig.name}</h1>
           </div>
 
-          <p className="section-lead">
-            Start the lab here: understand the current task, orient yourself to
-            the session, then move into the guide and workspace with a clear
-            next step.
-          </p>
+          <p className="section-lead">{labDescription}</p>
 
-          <div className="stats-grid">
-            <div className="stat-card stat-card--tertiary">
-              <span>Total tasks</span>
-              <strong>{summary.totalSteps}</strong>
+          {orientationGoals.length ? (
+            <div className="overview-orientation__goals-block">
+              <span className="detail-label">What you will practice</span>
+              <ul className="overview-orientation__goals">
+                {orientationGoals.map((goal) => (
+                  <li key={goal}>{goal}</li>
+                ))}
+              </ul>
             </div>
-            <div className="stat-card stat-card--tertiary">
-              <span>Completed</span>
-              <strong>{summary.completedSteps.length}</strong>
-            </div>
-            <div className="stat-card stat-card--tertiary">
-              <span>Needs evidence</span>
-              <strong>{summary.insufficientTasksCount}</strong>
-            </div>
-            <div className="stat-card stat-card--tertiary">
-              <span>Findings</span>
-              <strong>{summary.sortedFindings.length}</strong>
-            </div>
+          ) : null}
+
+          <div className="overview-orientation__next">
+            <span className="detail-label">Next step</span>
+            <p>
+              <strong>{primaryActionLabel}</strong>
+              {workflow.nextRecommendation?.description
+                ? `: ${workflow.nextRecommendation.description}`
+                : "."}
+            </p>
           </div>
 
-          <div className="content-stack">
-            <div className="detail-box detail-box--tertiary">
-              <span className="detail-label">Current task</span>
-              <p>{workflow.currentTaskLabel}</p>
-            </div>
-            <div className="detail-box detail-box--tertiary">
-              <span className="detail-label">Recommended next action</span>
-              <p>
-                <strong>{workflow.nextRecommendation.label}:</strong>{" "}
-                {workflow.nextRecommendation.description}
-              </p>
-            </div>
-            <div className="detail-box detail-box--tertiary">
-              <span className="detail-label">Workflow state</span>
-              <p>{workflow.status.detail}</p>
-            </div>
-          </div>
-
-          <div className="callout callout--info">
-            <strong>Suggested flow:</strong> Review the task and environment
-            here, then follow the current recommendation:{" "}
-            {workflow.nextRecommendation.description}
-          </div>
-
-          <div className="session-cta-row">
-            <Link
-              className="button button--primary"
-              to={buildSessionPath(sessionId, "guide")}
-            >
-              Open Guide
+          <div className="overview-orientation__cta">
+            <Link className="button button--primary" to={primaryActionHref}>
+              {primaryActionLabel}
             </Link>
-            <Link
-              className="button button--secondary"
-              to={buildSessionPath(sessionId, "workspace")}
-            >
-              Open Workspace
-            </Link>
-            {summary.sortedFindings.length ? (
-              <Link
-                className="button button--ghost"
-                to={buildSessionPath(sessionId, "reports")}
+          </div>
+        </div>
+      </section>
+
+      <section className="overview-path">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Lab Path</span>
+            <h2>How this lab flows</h2>
+          </div>
+        </div>
+
+        <div className="overview-path__grid">
+          {SESSION_SECTIONS.map((section) => {
+            const status = getPathStatus(
+              section.slug,
+              nextSectionSlug,
+              visitedSections
+            );
+
+            return (
+              <article
+                key={section.slug}
+                className={`overview-path__item ${
+                  section.slug === "overview"
+                    ? "overview-path__item--current"
+                    : section.slug === nextSectionSlug
+                    ? "overview-path__item--next"
+                    : ""
+                }`}
               >
-                Open Reports
-              </Link>
-            ) : null}
-          </div>
-        </article>
-
-        <article className="surface-card overview-panel overview-panel--tertiary">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Environment</span>
-              <h2>Runtime Status</h2>
-            </div>
-            <span className={badgeClass(runtimeReady ? "success" : "muted")}>
-              {runtimeReady
-                ? "Launched"
-                : sessionCompleted
-                ? "Cleaned up"
-                : "Waiting to launch"}
-            </span>
-          </div>
-
-          {runtimeInfo ? (
-            <div className="content-stack">
-              <div className="detail-grid detail-grid--two">
-                <div className="detail-box detail-box--tertiary">
-                  <span className="detail-label">Attacker</span>
-                  <p>{runtimeInfo.attacker_container || "Unavailable"}</p>
-                </div>
-                <div className="detail-box detail-box--tertiary">
-                  <span className="detail-label">Target</span>
-                  <p>{runtimeInfo.target_container || "Unavailable"}</p>
-                </div>
-                <div className="detail-box detail-box--tertiary">
-                  <span className="detail-label">Network</span>
-                  <p>{runtimeInfo.network_name || "Unavailable"}</p>
-                </div>
-                <div className="detail-box detail-box--tertiary">
-                  <span className="detail-label">Browser URL</span>
-                  <p>{runtimeInfo.browser_url || "No browser URL exposed."}</p>
-                </div>
-              </div>
-            </div>
-          ) : runtimeReady ? (
-            <div className="empty-card">
-              <div className="content-stack">
-                <strong>Environment launched</strong>
-                <p>
-                  The session has a persisted launch record from{" "}
-                  {sessionRecord?.environment_launched_at
-                    ? new Date(
-                        sessionRecord.environment_launched_at
-                      ).toLocaleString()
-                    : "this run"}
-                  , but the runtime details are not available in the current
-                  view yet.
-                </p>
-                <div className="inline-actions">
-                  <Link
-                    className="button button--secondary"
-                    to={buildSessionPath(sessionId, "workspace")}
-                  >
-                    Open Workspace
-                  </Link>
-                  <Link
-                    className="button button--ghost"
-                    to={buildSessionPath(sessionId, "reports")}
-                  >
-                    Open Reports
-                  </Link>
-                </div>
-              </div>
-            </div>
-          ) : sessionCompleted ? (
-            <div className="empty-card">
-              <div className="content-stack">
-                <strong>Environment cleaned up</strong>
-                <p>
-                  This session has been ended or the runtime was explicitly
-                  torn down. Review the saved evidence and reports, or start a
-                  new session when you need another live environment.
-                </p>
-                <div className="inline-actions">
-                  <Link
-                    className="button button--secondary"
-                    to={buildSessionPath(sessionId, "reports")}
-                  >
-                    Open Reports
-                  </Link>
-                  <Link className="button button--ghost" to="/profile">
-                    View History
-                  </Link>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="empty-card">
-              <div className="content-stack">
-                <strong>Environment not launched yet</strong>
-                <p>
-                  Open the workspace when you are ready to launch the training
-                  environment and begin validating the current step.
-                </p>
-                <div className="inline-actions">
-                  <Link
-                    className="button button--secondary"
-                    to={buildSessionPath(sessionId, "workspace")}
-                  >
-                    Open Workspace
-                  </Link>
-                  <Link
-                    className="button button--ghost"
-                    to={buildSessionPath(sessionId, "guide")}
-                  >
-                    Review Guide
-                  </Link>
-                </div>
-              </div>
-            </div>
-          )}
-        </article>
+                <span className="overview-path__step">
+                  Step {section.step}
+                </span>
+                <h3>{section.label}</h3>
+                <p>{section.description}</p>
+                {status ? (
+                  <span className="overview-path__state">{status}</span>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
       </section>
 
-      <section className="surface-card">
-        <div className="section-heading">
+      <details className="overview-support">
+        <summary className="overview-support__summary">
           <div>
-            <span className="eyebrow">Lab Briefing</span>
-            <h2>{activeLabDefinition?.name || activeLabConfig.name}</h2>
+            <span className="eyebrow">Secondary</span>
+            <h2>Session details and activity</h2>
           </div>
-          <span className={badgeClass("warning")}>
-            {activeLabDefinition?.difficulty || activeLabConfig.difficulty}
-          </span>
-        </div>
+          <span>{supportSummary}</span>
+        </summary>
 
-        {activeLabDefinition ? (
-          <div className="session-overview-grid">
-            <div className="detail-box">
-              <span className="detail-label">Description</span>
-              <p>
-                {activeLabDefinition.description ||
-                  "No lab description available."}
-              </p>
-            </div>
+        <div className="overview-support__body">
+          <div className="overview-support__grid">
+            <section className="overview-support__block">
+              <span className="detail-label">Session state</span>
+              <p>{sessionStateCopy}</p>
+              {sessionRecord?.environment_launched_at ? (
+                <p>
+                  <strong>Launched:</strong>{" "}
+                  {new Date(sessionRecord.environment_launched_at).toLocaleString()}
+                </p>
+              ) : null}
+              {labInfo?.browser_url ? (
+                <p>
+                  <strong>Browser URL:</strong> {labInfo.browser_url}
+                </p>
+              ) : null}
+            </section>
 
-            {activeLabDefinition.learning_objectives?.length ? (
-              <div className="detail-box">
-                <span className="detail-label">Learning Objectives</span>
-                <ul className="detail-list">
-                  {activeLabDefinition.learning_objectives.map((objective) => (
-                    <li key={objective}>{objective}</li>
+            <section className="overview-support__block">
+              <span className="detail-label">Saved evidence</span>
+              {summary.compactEvidenceSummary.length ? (
+                <div className="overview-support__list">
+                  {summary.compactEvidenceSummary.slice(0, 4).map(({ step, progress }) => (
+                    <div key={step.task_id} className="overview-support__list-item">
+                      <strong>{step.title}</strong>
+                      <p>{getEvidencePreview(progress)}</p>
+                    </div>
                   ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {activeLabDefinition.prerequisites?.length ? (
-              <div className="detail-box">
-                <span className="detail-label">Prerequisites</span>
-                <ul className="detail-list">
-                  {activeLabDefinition.prerequisites.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {activeLabDefinition.success_criteria?.length ? (
-              <div className="detail-box">
-                <span className="detail-label">Success Criteria</span>
-                <ul className="detail-list">
-                  {activeLabDefinition.success_criteria.map((criterion) => (
-                    <li key={criterion}>{criterion}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+                </div>
+              ) : (
+                <p>
+                  No saved evidence yet. It will appear here after you validate
+                  steps in the workspace and capture the strongest results.
+                </p>
+              )}
+            </section>
           </div>
-        ) : (
-          <div className="empty-card">
-            <div className="content-stack">
-              <strong>Loading lab briefing</strong>
-              <p>
-                The structured module details are still loading for this
-                session.
-              </p>
-            </div>
-          </div>
-        )}
-      </section>
 
-      <section className="surface-card">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Evidence</span>
-            <h2>Completed Task Highlights</h2>
-          </div>
-        </div>
-
-        {summary.compactEvidenceSummary.length ? (
-          <div className="stack-list">
-            {summary.compactEvidenceSummary.map(({ step, progress }) => (
-              <div key={step.task_id} className="stack-list__item">
-                <strong>{step.title}</strong>
-                <p>{getEvidencePreview(progress)}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-card">
-            <div className="content-stack">
-              <strong>No saved evidence yet</strong>
-              <p>
-                Evidence snippets will appear here after you complete guide
-                steps and validate them in the workspace.
-              </p>
-              <div className="inline-actions">
-                <Link
-                  className="button button--primary"
-                  to={buildSessionPath(sessionId, "guide")}
-                >
-                  Open Guide
-                </Link>
-                <Link
-                  className="button button--ghost"
-                  to={buildSessionPath(sessionId, "workspace")}
-                >
-                  Open Workspace
-                </Link>
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section className="surface-card">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Replay</span>
-            <h2>Investigation Timeline</h2>
-          </div>
-          <span
-            className={badgeClass(
-              workflow.timeline.latestEntry?.tone || "muted"
-            )}
-          >
-            {workflow.timeline.entryCount
-              ? `${workflow.timeline.entryCount} events`
-              : "No replay yet"}
-          </span>
-        </div>
-
-        <p className="section-lead">
-          This timeline turns the current session state into a readable
-          investigation trail, from launch and task validation through evidence,
-          findings, and reporting.
-        </p>
-
-        {workflow.timeline.entries.length ? (
-          <div className="timeline-list">
-            {workflow.timeline.entries.map((entry) => (
-              <article key={entry.key} className="timeline-entry">
-                <div
-                  className={`timeline-entry__marker timeline-entry__marker--${entry.tone}`}
-                  aria-hidden="true"
-                />
-                <div className="timeline-entry__body">
-                  <div className="section-heading">
+          <section className="overview-support__block overview-support__block--activity">
+            <span className="detail-label">Recent session activity</span>
+            {activityEntries.length ? (
+              <div className="overview-support__timeline">
+                {activityEntries.map((entry) => (
+                  <article key={entry.key} className="overview-support__timeline-item">
                     <div>
-                      <h3>{entry.label}</h3>
+                      <strong>{entry.label}</strong>
                       <p>{entry.detail}</p>
                     </div>
-                    <span className={badgeClass(entry.tone)}>
-                      {entry.category}
-                    </span>
-                  </div>
-                  <div className="timeline-entry__meta">
                     <span>
-                      {entry.timestampLabel ||
-                        "Ordered from the current session state"}
+                      {entry.timestampLabel || "Current session state"}
                     </span>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-card">
-            <div className="content-stack">
-              <strong>No timeline events yet</strong>
-              <p>
-                Start the lab, move through the guide and workspace, and save
-                evidence to build a readable replay of the investigation.
-              </p>
-              <div className="inline-actions">
-                <Link
-                  className="button button--primary"
-                  to={buildSessionPath(sessionId, "workspace")}
-                >
-                  Open Workspace
-                </Link>
-                <Link
-                  className="button button--ghost"
-                  to={buildSessionPath(sessionId, "guide")}
-                >
-                  Review Guide
-                </Link>
+                  </article>
+                ))}
               </div>
-            </div>
-          </div>
-        )}
-      </section>
+            ) : (
+              <p>
+                No session activity yet. Read the guide and move into the
+                workspace to start building a trace of the lab.
+              </p>
+            )}
+          </section>
+        </div>
+      </details>
     </div>
   );
 }

@@ -153,6 +153,28 @@ def build_target_urls(host_port: str) -> tuple[str, str]:
     return browser_url, probe_url
 
 
+def ensure_lab_image_available(client, image_name: str):
+    try:
+        return client.images.get(image_name)
+    except docker.errors.ImageNotFound:
+        if not settings.pull_runtime_images:
+            raise RuntimeError(
+                f"Required lab image '{image_name}' is not available locally and automatic pulling is disabled."
+            )
+
+        logger.info("lab_runtime_image_pull_start image=%s", image_name)
+        try:
+            image = client.images.pull(image_name)
+        except docker.errors.DockerException as exc:
+            logger.exception("lab_runtime_image_pull_failed image=%s", image_name)
+            raise RuntimeError(
+                f"Required lab image '{image_name}' is not available locally and could not be pulled. Ensure the Docker host can reach the image registry or preload the image."
+            ) from exc
+
+        logger.info("lab_runtime_image_pull_complete image=%s", image_name)
+        return image
+
+
 def launch_lab(session_id: int, lab_id: str):
     client = get_docker_client()
     lab = LABS.get(lab_id)
@@ -181,6 +203,9 @@ def launch_lab(session_id: int, lab_id: str):
         safe_remove_container(attacker_name, client=client)
         safe_remove_container(target_name, client=client)
         safe_remove_network(network_name, client=client)
+
+        ensure_lab_image_available(client, lab["attacker"]["image"])
+        ensure_lab_image_available(client, lab["target"]["image"])
 
         network = get_or_create_network(client, network_name, session_id, lab_id)
         container_limits = build_container_limits()

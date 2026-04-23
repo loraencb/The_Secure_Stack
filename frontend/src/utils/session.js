@@ -113,10 +113,23 @@ export function hydrateRuntimeLabSteps(steps = [], runtimeInfo = null) {
   return steps.map((step) => ({
     ...step,
     instruction: resolveRuntimeStepText(step.instruction, browserUrl),
+    learning_takeaway: resolveRuntimeStepText(
+      step.learning_takeaway,
+      browserUrl
+    ),
+    why_observation_matters: resolveRuntimeStepText(
+      step.why_observation_matters,
+      browserUrl
+    ),
     expected_outcome: resolveRuntimeStepText(step.expected_outcome, browserUrl),
     command_hint: resolveRuntimeStepText(step.command_hint, browserUrl),
     hint_text: resolveRuntimeStepText(step.hint_text, browserUrl),
     remediation_text: resolveRuntimeStepText(step.remediation_text, browserUrl),
+    what_to_observe: Array.isArray(step.what_to_observe)
+      ? step.what_to_observe.map((item) =>
+          resolveRuntimeStepText(item, browserUrl)
+        )
+      : step.what_to_observe,
     hints: Array.isArray(step.hints)
       ? step.hints.map((hint) => resolveRuntimeStepText(hint, browserUrl))
       : step.hints,

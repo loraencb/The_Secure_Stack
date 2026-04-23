@@ -50,12 +50,12 @@ const FINDING_SOURCE_META = {
     category: "Finding",
   },
   ai_suggestion: {
-    prefix: "Accepted AI finding suggestion",
+    prefix: "Accepted tutor finding suggestion",
     tone: "sky",
     category: "Finding",
   },
   ai_auto_saved: {
-    prefix: "AI auto-saved finding",
+    prefix: "Tutor saved finding",
     tone: "info",
     category: "Finding",
   },
@@ -277,7 +277,7 @@ export function getSessionTimeline({
     createTimelineEntry({
       key: `session-${sessionId}`,
       label: "Session started",
-      detail: `Session #${sessionId} opened the investigation workflow.`,
+      detail: `Session #${sessionId} opened the guided lab.`,
       tone: "success",
       category: "Session",
       timestamp: sessionRecord?.start_time || workflowState.sessionStartedAt,
@@ -296,9 +296,7 @@ export function getSessionTimeline({
         key: `environment-${sessionId}`,
         label: "Environment launched",
         detail: (labInfo?.attacker_container || sessionRecord?.attacker_container)
-          ? `Connected to ${
-              labInfo?.attacker_container || sessionRecord?.attacker_container
-            } and prepared the live lab runtime.`
+          ? "Connected the learner workspace and prepared the live lab environment."
           : "The lab environment was launched for live investigation.",
         tone: "sky",
         category: "Environment",

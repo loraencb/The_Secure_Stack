@@ -96,7 +96,7 @@ export default function SessionReportsPanel() {
             <span className="detail-label">Task objective</span>
             <p>
               {evidenceContext.taskObjective ||
-                "The active task objective will appear here once the workflow has enough context."}
+                "The active task objective will appear here once the lab has enough context."}
             </p>
           </div>
           <div className="detail-box detail-box--tertiary">
@@ -375,8 +375,8 @@ export default function SessionReportsPanel() {
                 <strong>No findings saved yet</strong>
                 <p>
                   {workflow.hasCommandActivity
-                    ? "Commands have already been captured for this session. Save the strongest evidence as a finding here or accept an AI suggestion from the session rail."
-                    : "Use the workspace to gather evidence, then save the strongest observations here or accept an AI suggestion from the session rail."}
+                    ? "Commands have already been captured for this session. Save the strongest evidence as a finding here or accept a tutor suggestion from the workspace."
+                    : "Use the workspace to gather evidence, then save the strongest observations here or accept a tutor suggestion from the workspace."}
                 </p>
                 <div className="inline-actions">
                   <Link

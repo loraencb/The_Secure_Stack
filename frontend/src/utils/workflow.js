@@ -2,6 +2,10 @@ import {
   getEvidenceContext,
   getFindingEvidenceStats,
 } from "./findings";
+import {
+  buildCompletedStepTakeaways,
+  buildLabDebrief,
+} from "./learning";
 import { getSessionTimeline } from "./timeline";
 
 const WORKFLOW_STORAGE_KEY_PREFIX = "securestack_session_workflow_";
@@ -17,6 +21,9 @@ const DEFAULT_WORKFLOW_STATE = {
   environmentLaunchedAt: "",
   findingHistory: [],
   reportGeneratedAt: "",
+  reinforcedStepIds: [],
+  labDebriefShownAt: "",
+  tutorConversation: [],
 };
 
 function getWorkflowStorageKey(sessionId) {
@@ -31,6 +38,58 @@ function normalizeVisitedSections(visitedSections = []) {
       )
     )
   );
+}
+
+function normalizeTutorConversation(tutorConversation = []) {
+  if (!Array.isArray(tutorConversation)) {
+    return [];
+  }
+
+  return tutorConversation
+    .filter(
+      (entry) =>
+        typeof entry?.role === "string" &&
+        entry.role.trim() &&
+        typeof entry?.content === "string" &&
+        entry.content.trim()
+    )
+    .map((entry, index) => ({
+      id:
+        typeof entry?.id === "string" && entry.id.trim()
+          ? entry.id.trim()
+          : `tutor-entry-${index}`,
+      role: entry.role.trim(),
+      origin:
+        typeof entry?.origin === "string" ? entry.origin.trim() : "",
+      title: typeof entry?.title === "string" ? entry.title.trim() : "",
+      content: entry.content.trim(),
+      detail: typeof entry?.detail === "string" ? entry.detail.trim() : "",
+      nextStep:
+        typeof entry?.nextStep === "string" ? entry.nextStep.trim() : "",
+      learningReinforcement:
+        typeof entry?.learningReinforcement === "string"
+          ? entry.learningReinforcement.trim()
+          : "",
+      warning:
+        typeof entry?.warning === "string" ? entry.warning.trim() : "",
+      interventionLabel:
+        typeof entry?.interventionLabel === "string"
+          ? entry.interventionLabel.trim()
+          : "",
+      askIntent:
+        typeof entry?.askIntent === "string" ? entry.askIntent.trim() : "",
+      askLabel:
+        typeof entry?.askLabel === "string" ? entry.askLabel.trim() : "",
+      hintLabel:
+        typeof entry?.hintLabel === "string" ? entry.hintLabel.trim() : "",
+      tutorMode:
+        typeof entry?.tutorMode === "string" ? entry.tutorMode.trim() : "",
+      assessment:
+        typeof entry?.assessment === "string" ? entry.assessment.trim() : "",
+      createdAt:
+        typeof entry?.createdAt === "string" ? entry.createdAt : "",
+    }))
+    .slice(-40);
 }
 
 function normalizeWorkflowState(workflowState = {}) {
@@ -77,6 +136,18 @@ function normalizeWorkflowState(workflowState = {}) {
       ? workflowState.visitedSections
       : normalizedSectionHistory.map((entry) => entry.section)
   );
+  const tutorConversation = normalizeTutorConversation(
+    workflowState.tutorConversation
+  );
+  const reinforcedStepIds = Array.isArray(workflowState.reinforcedStepIds)
+    ? Array.from(
+        new Set(
+          workflowState.reinforcedStepIds.filter(
+            (stepId) => typeof stepId === "string" && stepId.trim()
+          )
+        )
+      )
+    : [];
 
   return {
     visitedSections: normalizedVisitedSections,
@@ -110,6 +181,12 @@ function normalizeWorkflowState(workflowState = {}) {
       typeof workflowState.reportGeneratedAt === "string"
         ? workflowState.reportGeneratedAt
         : "",
+    reinforcedStepIds,
+    labDebriefShownAt:
+      typeof workflowState.labDebriefShownAt === "string"
+        ? workflowState.labDebriefShownAt
+        : "",
+    tutorConversation,
   };
 }
 
@@ -158,7 +235,7 @@ function getWorkflowStatus({
     return {
       label: "Ready to start",
       tone: "muted",
-      detail: "Start a session to open the guided lab workflow.",
+      detail: "Start a session to open the guided lab.",
     };
   }
 
@@ -167,7 +244,7 @@ function getWorkflowStatus({
       label: "Report ready",
       tone: "success",
       detail:
-        "The workflow has reached the reporting stage and the session summary is available.",
+        "The lab has reached the reporting stage and the session summary is available.",
     };
   }
 
@@ -185,7 +262,7 @@ function getWorkflowStatus({
       label: "Waiting for launch",
       tone: "sky",
       detail:
-        "The session is active, but the attacker and target environment still needs to be launched.",
+        "The session is active, but the lab environment still needs to be launched.",
     };
   }
 
@@ -318,7 +395,7 @@ function getNextRecommendation({
         tone: "success",
         description:
           "This session has been completed and the environment was cleaned up. Review the final report and saved evidence.",
-        reason: "Completed sessions stay available for review even after the lab runtime is removed.",
+        reason: "Completed sessions stay available so you can review what was produced.",
       };
     }
 
@@ -332,7 +409,7 @@ function getNextRecommendation({
           description:
             "This session is complete, but the saved findings still need clearer evidence context before the report feels finished.",
           reason:
-            "The runtime is gone, so this session is now best used as a review and reporting space.",
+            "The live lab has ended, so this session is now best used for review and reporting.",
         };
       }
 
@@ -355,7 +432,7 @@ function getNextRecommendation({
       description:
         "This session has already been ended and the environment was cleaned up. Start a fresh session when you are ready to launch a new lab.",
       reason:
-        "Completed sessions stay available for review, but they do not reopen a live environment.",
+        "Completed sessions stay available for review, but they do not reopen the lab environment.",
     };
   }
 
@@ -368,7 +445,7 @@ function getNextRecommendation({
       description: activeTask
         ? `Open the workspace and launch the environment so you can validate step ${activeTask.number}: ${activeTask.title}.`
         : "Open the workspace and launch the lab environment to begin validating the lab.",
-      reason: "The lab cannot be validated until the attacker and target containers are live.",
+      reason: "The lab cannot be validated until the live environment is ready.",
     };
   }
 
@@ -441,7 +518,7 @@ function getNextRecommendation({
       label: "Open Workspace",
       targetSection: "workspace",
       tone: "info",
-      description: `Use the workspace runtime details to complete the browser validation for step ${activeTask.number}: ${activeTask.title}.`,
+      description: `Use the browser link in the workspace to complete step ${activeTask.number}: ${activeTask.title}.`,
       reason: "The active task requires confirming the browser experience from the running environment.",
     };
   }
@@ -468,7 +545,7 @@ function getNextRecommendation({
         description:
           "Saved findings exist, but they still need stronger task and command context before the report will feel complete.",
         reason:
-          "The reporting pipeline has findings, but they are not yet grounded in clear evidence context.",
+          "The report has findings, but they are not yet grounded in clear evidence context.",
       };
     }
 
@@ -490,7 +567,7 @@ function getNextRecommendation({
       tone: "success",
       description:
         "The report is ready. Review the saved findings, summary, and recommendations before wrapping up the lab.",
-      reason: "The workflow has reached its final reporting stage.",
+      reason: "The lab has reached its final reporting stage.",
     };
   }
 
@@ -502,7 +579,7 @@ function getNextRecommendation({
     description: activeTask
       ? `Continue validating step ${activeTask.number}: ${activeTask.title} in the workspace.`
       : "Continue working through the live workspace and capture evidence as you go.",
-    reason: "The workflow is ready for more validation activity.",
+    reason: "The lab is ready for more validation activity.",
   };
 }
 
@@ -580,6 +657,8 @@ export function getDefaultWorkflowState() {
     visitedSections: [],
     sectionHistory: [],
     findingHistory: [],
+    reinforcedStepIds: [],
+    tutorConversation: [],
   };
 }
 
@@ -645,6 +724,7 @@ export function getSessionWorkflow({
   sessionRecord = null,
   summary,
   labSteps = [],
+  labDefinition = null,
   labInfo,
   report,
   findings = [],
@@ -680,13 +760,36 @@ export function getSessionWorkflow({
         number: summary.currentLabStepIndex + 1,
       }
     : null;
+  const labCompleted =
+    summary.totalSteps > 0 && summary.completedSteps.length >= summary.totalSteps;
+  const completedStepTakeaways = buildCompletedStepTakeaways({
+    completedTaskRecords: summary.completedTaskRecords,
+    totalSteps: summary.totalSteps,
+    labSteps,
+  });
+  const latestStepTakeaway =
+    completedStepTakeaways[completedStepTakeaways.length - 1] || null;
+  const labDebrief = labCompleted
+    ? buildLabDebrief({
+        labDefinition,
+        labSteps,
+        completedTaskRecords: summary.completedTaskRecords,
+        findings,
+        commandsRunCount,
+      })
+    : null;
   const baseWorkflowContext = {
     activeTask,
     currentTaskLabel: activeTask
       ? `Step ${activeTask.number}: ${activeTask.title}`
+      : labCompleted
+      ? "Lab complete"
       : "All guided lab steps completed",
     currentTaskObjective:
-      activeTask?.objective || activeTask?.instruction || "",
+      activeTask?.objective ||
+      activeTask?.instruction ||
+      labDebrief?.summary ||
+      "",
     currentTaskStatus:
       summary.activeTaskProgress?.status || (activeTask ? "pending" : "completed"),
     lastCommand: normalizedState.lastCommand || persistedLastCommand,
@@ -767,13 +870,25 @@ export function getSessionWorkflow({
     evidenceContext,
     reportGenerated,
     reportReadiness,
+    tutorConversation: normalizedState.tutorConversation,
+    reinforcedStepIds: normalizedState.reinforcedStepIds,
+    labDebriefShownAt: normalizedState.labDebriefShownAt,
     activeTask,
+    labCompleted,
+    completedStepTakeaways,
+    latestStepTakeaway,
+    labDebrief,
     currentTaskNumber: activeTask?.number || 0,
     currentTaskLabel: activeTask
       ? `Step ${activeTask.number}: ${activeTask.title}`
+      : labCompleted
+      ? "Lab complete"
       : "All guided lab steps completed",
     currentTaskObjective:
-      activeTask?.objective || activeTask?.instruction || "",
+      activeTask?.objective ||
+      activeTask?.instruction ||
+      labDebrief?.summary ||
+      "",
     currentTaskStatus:
       summary.activeTaskProgress?.status || (activeTask ? "pending" : "completed"),
     completedStepCount: summary.completedSteps.length,

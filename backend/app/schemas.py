@@ -18,6 +18,7 @@ class UserResponse(BaseModel):
     id: int
     email: str
     display_name: Optional[str]
+    is_instructor: bool = False
     created_at: datetime
     last_login_at: Optional[datetime]
 
@@ -155,3 +156,76 @@ class TaskProgressResponse(TaskProgressBase):
 
     class Config:
         from_attributes = True
+
+
+class TutorEventResponse(BaseModel):
+    id: int
+    session_id: int
+    user_id: int
+    lab_id: Optional[str]
+    task_id: Optional[str]
+    step_number: Optional[int]
+    step_title: Optional[str]
+    response_origin: Optional[str]
+    tutor_mode: Optional[str]
+    intervention_reason: Optional[str]
+    ask_intent: Optional[str]
+    learner_message: Optional[str]
+    tutor_message: str
+    created_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class InstructorReviewSessionSummary(BaseModel):
+    id: int
+    student_user_id: int
+    student_display_name: str
+    student_email: str
+    lab_id: Optional[str]
+    lab_name: str
+    status: str
+    start_time: datetime
+    environment_launched_at: Optional[datetime]
+    report_generated_at: Optional[datetime]
+    end_time: Optional[datetime]
+    findings_count: int = 0
+    completed_steps: int = 0
+    total_steps: int = 0
+    tutor_interventions: int = 0
+    proactive_interventions: int = 0
+    explicit_help_requests: int = 0
+    idle_nudges: int = 0
+    off_track_events: int = 0
+    struggle_steps: int = 0
+    history_status: str
+    support_level: str
+
+
+class InstructorReviewStepSummary(BaseModel):
+    task_id: str
+    step_number: int
+    title: str
+    objective: str = ""
+    status: str = "pending"
+    completed_at: Optional[datetime]
+    completion_method: Optional[str]
+    evidence_command: Optional[str]
+    evidence_quality: Optional[str]
+    ai_status: Optional[str]
+    ai_feedback: Optional[str]
+    tutor_interventions: int = 0
+    proactive_interventions: int = 0
+    explicit_help_requests: int = 0
+    idle_nudges: int = 0
+    off_track_events: int = 0
+    support_level: str
+    latest_tutor_message: Optional[str] = None
+
+
+class InstructorReviewDetailResponse(BaseModel):
+    session: InstructorReviewSessionSummary
+    step_summaries: list[InstructorReviewStepSummary]
+    tutor_events: list[TutorEventResponse]
+    findings: list[FindingResponse]

@@ -122,7 +122,7 @@ export default function ProfilePage() {
           <h1>Track active work and reopen durable past investigations.</h1>
           <p>
             This page keeps the current session visible while also surfacing
-            earlier labs the platform remembers from the backend.
+            earlier labs saved to your account.
           </p>
           <div className="page-header__actions">
             {sessionId ? (
@@ -273,7 +273,7 @@ export default function ProfilePage() {
               </div>
             ) : (
               <div className="empty-card">
-                <strong>No report yet</strong>
+            <strong>No report yet</strong>
                 <p>
                   Generate a report from the session workspace to surface the
                   latest analysis here.
@@ -293,7 +293,7 @@ export default function ProfilePage() {
             {historyLoading ? (
               <div className="empty-card">
                 <strong>Loading session history</strong>
-                <p>The backend is preparing durable investigation summaries.</p>
+                <p>Preparing your saved lab summaries.</p>
               </div>
             ) : historyError ? (
               <div className="empty-card">
@@ -327,13 +327,11 @@ export default function ProfilePage() {
                         <p>{entry.findings_count} saved</p>
                       </div>
                       <div className="detail-box detail-box--tertiary">
-                        <span className="detail-label">Runtime</span>
+                        <span className="detail-label">Lab environment</span>
                         <p>
                           {entry.environment_launched_at
-                            ? `${entry.attacker_container || "Attacker"} -> ${
-                                entry.target_container || "Target"
-                              }`
-                            : "Environment was not launched or older metadata is unavailable."}
+                            ? "Launched for this session"
+                            : "Environment was not launched for this session."}
                         </p>
                       </div>
                       <div className="inline-actions">

@@ -16,6 +16,9 @@ const DEFAULT_SHELL_PATH = "~/secure-stack-lab";
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const BACKEND_PROMPT_PATTERN =
   /(^|\r?\n)\[stderr\]\s*([A-Za-z0-9_.-]+)@([A-Za-z0-9_.-]+):([^\r\n]*?)([#\$])\s*(?=$|\r?\n)/g;
+const INTERNAL_TERMINAL_LINE_PATTERN =
+  /\[Attacker container:[^\]\r\n]*\]\r?\n?/gi;
+const CONTAINER_SHELL_READY_PATTERN = /\[Linux container shell ready\]/gi;
 
 function buildShellMeta(containerLabel) {
   return {
@@ -38,6 +41,7 @@ const LiveTerminal = forwardRef(function LiveTerminal({
   sessionId,
   containerLabel,
   onFeedback,
+  onTutorPendingChange,
   onFindingSuggestion,
   onFindingAutoSaved,
   onCommandSubmitted,
@@ -46,8 +50,7 @@ const LiveTerminal = forwardRef(function LiveTerminal({
   const terminalRef = useRef(null);
   const termInstanceRef = useRef(null);
   const socketRef = useRef(null);
-  const activeCommandRef = useRef(null);
-  const commandOutputRef = useRef("");
+  const pendingCommandQueueRef = useRef([]);
   const promptVisibleRef = useRef(false);
   const shellMetaRef = useRef(buildShellMeta(containerLabel));
   const [terminalStatus, setTerminalStatus] = useState("connecting");
@@ -59,6 +62,7 @@ const LiveTerminal = forwardRef(function LiveTerminal({
   const onFindingAutoSavedRef = useRef(onFindingAutoSaved);
   const onCommandSubmittedRef = useRef(onCommandSubmitted);
   const onCommandResultRef = useRef(onCommandResult);
+  const onTutorPendingChangeRef = useRef(onTutorPendingChange);
 
   useEffect(() => {
     onFeedbackRef.current = onFeedback;
@@ -81,35 +85,56 @@ const LiveTerminal = forwardRef(function LiveTerminal({
   }, [onCommandResult]);
 
   useEffect(() => {
+    onTutorPendingChangeRef.current = onTutorPendingChange;
+  }, [onTutorPendingChange]);
+
+  useEffect(() => {
     const nextShellMeta = buildShellMeta(containerLabel);
     shellMetaRef.current = nextShellMeta;
     setShellMeta(nextShellMeta);
   }, [containerLabel, sessionId]);
 
+  const sendTutorMessage = useCallback(
+    ({ intent = "hint", message = "", history = [], source = "" } = {}) => {
+      const socket = socketRef.current;
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        throw new Error(
+          "The tutor is only available while the live shell is connected."
+        );
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "ask_tutor",
+          intent,
+          message,
+          history,
+        })
+      );
+
+      onTutorPendingChangeRef.current?.({
+        active: true,
+        source: source || (message.trim() ? "tutor_chat" : "ask_tutor"),
+      });
+    },
+    []
+  );
+
   const requestTutorHelp = useCallback((intent = "hint") => {
-    const socket = socketRef.current;
-
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      throw new Error("The tutor is only available while the live shell is connected.");
-    }
-
-    socket.send(
-      JSON.stringify({
-        type: "ask_tutor",
-        intent,
-      })
-    );
-  }, []);
+    sendTutorMessage({ intent });
+  }, [sendTutorMessage]);
 
   useImperativeHandle(
     ref,
     () => ({
       requestTutorHelp,
+      sendTutorMessage,
       focus() {
         terminalRef.current?.focus();
       },
     }),
-    [requestTutorHelp]
+    [requestTutorHelp, sendTutorMessage]
   );
 
   useEffect(() => {
@@ -118,6 +143,7 @@ const LiveTerminal = forwardRef(function LiveTerminal({
     setTerminalStatus("connecting");
     setIsFocused(false);
     promptVisibleRef.current = false;
+    pendingCommandQueueRef.current = [];
     shellMetaRef.current = buildShellMeta(containerLabel);
     setShellMeta(shellMetaRef.current);
 
@@ -184,10 +210,10 @@ const LiveTerminal = forwardRef(function LiveTerminal({
       let promptDetected = false;
       const sanitizedOutput = output.replace(
         BACKEND_PROMPT_PATTERN,
-        (match, leadingLineBreak, user, host, path, marker) => {
+        (match, leadingLineBreak, user, _host, path, marker) => {
           const nextShellMeta = {
             user: user || DEFAULT_SHELL_USER,
-            host: host || containerLabel || "workspace",
+            host: containerLabel || "workspace",
             path: (path || DEFAULT_SHELL_PATH).replace(ANSI_ESCAPE_PATTERN, ""),
             marker: marker || "#",
           };
@@ -199,7 +225,9 @@ const LiveTerminal = forwardRef(function LiveTerminal({
       );
 
       return {
-        output: sanitizedOutput,
+        output: sanitizedOutput
+          .replace(INTERNAL_TERMINAL_LINE_PATTERN, "")
+          .replace(CONTAINER_SHELL_READY_PATTERN, "[Lab shell ready]"),
         promptDetected,
       };
     };
@@ -225,36 +253,31 @@ const LiveTerminal = forwardRef(function LiveTerminal({
         if (message.type === "terminal_output") {
           const { output, promptDetected } = syncPromptFromOutput(message.data);
 
-          if (activeCommandRef.current) {
-            commandOutputRef.current += output;
+          if (pendingCommandQueueRef.current.length) {
+            pendingCommandQueueRef.current[0].output += output;
           }
 
           if (output) {
             term.write(output);
           }
 
-          if (promptDetected) {
-            if (promptVisibleRef.current && !currentLine && !activeCommandRef.current) {
-              term.write("\r\x1b[2K");
-            }
-
-            if (!promptVisibleRef.current || (!currentLine && !activeCommandRef.current)) {
-              writePrompt();
-            }
+          if (promptDetected && !promptVisibleRef.current) {
+            writePrompt();
           }
         } else if (message.type === "ai_feedback" && onFeedbackRef.current) {
+          onTutorPendingChangeRef.current?.({
+            active: false,
+          });
           onFeedbackRef.current(message.data);
 
-          if (activeCommandRef.current && onCommandResultRef.current) {
+          const completedCommand = pendingCommandQueueRef.current.shift();
+          if (completedCommand && onCommandResultRef.current) {
             onCommandResultRef.current({
-              command: activeCommandRef.current.command,
-              output: commandOutputRef.current,
+              command: completedCommand.command,
+              output: completedCommand.output,
               feedback: message.data,
             });
           }
-
-          activeCommandRef.current = null;
-          commandOutputRef.current = "";
 
           if (!promptVisibleRef.current) {
             writePrompt();
@@ -287,6 +310,10 @@ const LiveTerminal = forwardRef(function LiveTerminal({
       if (isDisposed) return;
       setTerminalStatus("disconnected");
       promptVisibleRef.current = false;
+      pendingCommandQueueRef.current = [];
+      onTutorPendingChangeRef.current?.({
+        active: false,
+      });
       term.writeln("\r\n\x1b[1;31m[terminal disconnected]\x1b[0m");
     };
 
@@ -294,6 +321,9 @@ const LiveTerminal = forwardRef(function LiveTerminal({
       if (isDisposed) return;
       setTerminalStatus("error");
       promptVisibleRef.current = false;
+      onTutorPendingChangeRef.current?.({
+        active: false,
+      });
       term.writeln("\r\n\x1b[1;31m[terminal socket error]\x1b[0m");
     };
 
@@ -325,8 +355,14 @@ const LiveTerminal = forwardRef(function LiveTerminal({
           onCommandSubmittedRef.current(submitted);
         }
 
-        activeCommandRef.current = { command: submitted };
-        commandOutputRef.current = "";
+        pendingCommandQueueRef.current.push({
+          command: submitted,
+          output: "",
+        });
+        onTutorPendingChangeRef.current?.({
+          active: true,
+          source: "command_review",
+        });
         promptVisibleRef.current = false;
 
         socket.send(
@@ -366,6 +402,11 @@ const LiveTerminal = forwardRef(function LiveTerminal({
         socketRef.current.close();
         socketRef.current = null;
       }
+
+      pendingCommandQueueRef.current = [];
+      onTutorPendingChangeRef.current?.({
+        active: false,
+      });
 
       if (termInstanceRef.current) {
         termInstanceRef.current.dispose();

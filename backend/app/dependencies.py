@@ -3,6 +3,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app import models
+from app.config import settings
 from app.database import SessionLocal
 from app.security import get_user_for_token
 
@@ -54,3 +55,15 @@ def get_owned_session_or_404(db: Session, session_id: int, user_id: int):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+def require_instructor_user(
+    current_user: models.User = Depends(get_current_user),
+):
+    if not settings.is_instructor_email(current_user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Instructor review access is not available for this account",
+        )
+
+    return current_user

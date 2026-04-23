@@ -27,6 +27,14 @@ from app.services.ai_terminal_feedback import (
 router = APIRouter(tags=["Terminal"])
 logger = logging.getLogger("securestack.ws_terminal")
 PROMPT_PATTERN = re.compile(r"\[stderr\]\s.*#\s*$", re.MULTILINE)
+INTERVENTION_COOLDOWNS = {
+    "success_reinforcement": 120.0,
+    "progress_briefing": 90.0,
+    "browser_handoff_guidance": 120.0,
+    "off_track_redirect": 75.0,
+    "stuck_intervention": 60.0,
+    "idle_nudge": 180.0,
+}
 
 
 async def safe_send_json(websocket: WebSocket, payload: dict) -> bool:
@@ -47,9 +55,32 @@ def _parse_client_message(raw_data: str) -> dict:
     if isinstance(payload, dict):
         message_type = (payload.get("type") or "").strip()
         if message_type == "ask_tutor":
+            history = payload.get("history")
+            normalized_history = []
+            if isinstance(history, list):
+                for item in history[-8:]:
+                    if not isinstance(item, dict):
+                        continue
+
+                    role = str(item.get("role") or "").strip().lower()
+                    content = str(item.get("content") or "").strip()
+                    if not content:
+                        continue
+
+                    normalized_history.append(
+                        {
+                            "role": "student"
+                            if role in {"student", "user", "learner"}
+                            else "tutor",
+                            "content": content[:600],
+                        }
+                    )
+
             return {
                 "type": "ask_tutor",
                 "intent": str(payload.get("intent") or "").strip(),
+                "message": str(payload.get("message") or "").strip(),
+                "history": normalized_history,
             }
 
         if message_type == "terminal_input":
@@ -191,6 +222,10 @@ def _build_active_step_context(session: models.Session, db: Session):
         "lab_id": session.lab_id,
         "lab_name": lab_definition.get("name") or session.lab_name,
         "lab_objectives": lab_definition.get("learning_objectives", [])[:3],
+        "lab_pre_lab_context": lab_definition.get("pre_lab_context") or "",
+        "lab_environment_overview": lab_definition.get("environment_overview") or "",
+        "lab_reflection_prompt": lab_definition.get("reflection_prompt") or "",
+        "lab_takeaways": lab_definition.get("lab_takeaways", [])[:4],
         "topology_summary": (
             lab_definition.get("topology", {}) or {}
         ).get("summary"),
@@ -209,6 +244,15 @@ def _build_active_step_context(session: models.Session, db: Session):
             else ""
         ),
         "step_explanation": active_task.get("explanation") if active_task else "",
+        "step_learning_takeaway": (
+            active_task.get("learning_takeaway") if active_task else ""
+        ),
+        "step_what_to_observe": (
+            active_task.get("what_to_observe", []) if active_task else []
+        ),
+        "step_why_observation_matters": (
+            active_task.get("why_observation_matters") if active_task else ""
+        ),
         "step_objective": active_task.get("objective") if active_task else "",
         "step_expected_outcome": (
             _resolve_step_text(active_task.get("expected_outcome"), session)
@@ -251,6 +295,7 @@ def _build_ai_context(
     db: Session,
     recent_command_history: list[dict],
     tutor_state: dict[str, dict[str, int]],
+    recent_tutor_messages: list[dict] | None = None,
 ):
     step_context = _build_active_step_context(session, db) or {
         "lab_id": session.lab_id,
@@ -258,6 +303,7 @@ def _build_ai_context(
     }
     step_task_id = step_context.get("step_task_id")
     step_context["recent_commands"] = recent_command_history[-5:]
+    step_context["recent_tutor_messages"] = (recent_tutor_messages or [])[-8:]
     step_context["step_help_requests"] = (
         tutor_state["help_requests"].get(step_task_id, 0) if step_task_id else 0
     )
@@ -268,6 +314,75 @@ def _build_ai_context(
         tutor_state["struggle_counts"].get(step_task_id, 0) if step_task_id else 0
     )
     return step_context
+
+
+def _tutor_reply_excerpt(feedback: dict) -> str:
+    return (
+        feedback.get("explanation")
+        or feedback.get("next_step")
+        or feedback.get("learning_reinforcement")
+        or ""
+    ).strip()
+
+
+def _should_append_feedback_to_chat(
+    feedback: dict,
+    tutor_delivery_state: dict[str, object],
+) -> bool:
+    response_origin = (feedback.get("response_origin") or "").strip()
+    if response_origin in {"ask_tutor", "tutor_chat"}:
+        return True
+
+    if not feedback.get("should_append_to_chat") or not feedback.get(
+        "proactive_intervention"
+    ):
+        return False
+
+    now = time.monotonic()
+    intervention_reason = feedback.get("intervention_reason") or ""
+    intervention_key = feedback.get("intervention_key") or ""
+    cooldown = INTERVENTION_COOLDOWNS.get(intervention_reason, 60.0)
+    last_by_key = tutor_delivery_state.get("last_by_key") or {}
+
+    if intervention_key:
+        last_sent_at = last_by_key.get(intervention_key, 0.0)
+        if (now - last_sent_at) < cooldown:
+            return False
+
+    reply_excerpt = _tutor_reply_excerpt(feedback)
+    if (
+        reply_excerpt
+        and reply_excerpt == tutor_delivery_state.get("last_content", "")
+        and (now - tutor_delivery_state.get("last_sent_at", 0.0)) < cooldown
+    ):
+        return False
+
+    return True
+
+
+def _record_tutor_feedback(
+    feedback: dict,
+    recent_tutor_messages: list[dict],
+    tutor_delivery_state: dict[str, object],
+):
+    reply_excerpt = _tutor_reply_excerpt(feedback)
+    if not reply_excerpt:
+        return
+
+    recent_tutor_messages.append(
+        {
+            "role": "tutor",
+            "content": reply_excerpt[:600],
+        }
+    )
+    del recent_tutor_messages[:-12]
+
+    sent_at = time.monotonic()
+    tutor_delivery_state["last_content"] = reply_excerpt
+    tutor_delivery_state["last_sent_at"] = sent_at
+    intervention_key = feedback.get("intervention_key") or ""
+    if intervention_key:
+        tutor_delivery_state.setdefault("last_by_key", {})[intervention_key] = sent_at
 
 
 def save_auto_finding(
@@ -325,6 +440,40 @@ def save_auto_finding(
         db.commit()
         db.refresh(new_finding)
         return new_finding, True
+    finally:
+        db.close()
+
+
+def save_tutor_event(
+    session_id: int,
+    user_id: int,
+    feedback: dict,
+    context: dict | None = None,
+    learner_message: str | None = None,
+):
+    tutor_message = _tutor_reply_excerpt(feedback)
+    if not tutor_message:
+        return
+
+    db: Session = SessionLocal()
+    try:
+        tutor_event = models.TutorEvent(
+            session_id=session_id,
+            user_id=user_id,
+            lab_id=(context or {}).get("lab_id"),
+            task_id=(context or {}).get("step_task_id"),
+            step_number=(context or {}).get("step_number"),
+            step_title=(context or {}).get("step_title"),
+            response_origin=(feedback.get("response_origin") or "").strip() or None,
+            tutor_mode=(feedback.get("tutor_mode") or "").strip() or None,
+            intervention_reason=(feedback.get("intervention_reason") or "").strip()
+            or None,
+            ask_intent=(feedback.get("ask_intent") or "").strip() or None,
+            learner_message=(learner_message or "").strip() or None,
+            tutor_message=tutor_message,
+        )
+        db.add(tutor_event)
+        db.commit()
     finally:
         db.close()
 
@@ -397,10 +546,16 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
     sender_task = None
     latest_output_buffer = []
     recent_command_history = []
+    recent_tutor_messages = []
     tutor_state = {
         "help_requests": {},
         "off_track_counts": {},
         "struggle_counts": {},
+    }
+    tutor_delivery_state = {
+        "last_by_key": {},
+        "last_content": "",
+        "last_sent_at": 0.0,
     }
     db: Session = SessionLocal()
 
@@ -508,10 +663,12 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
 
             if message_type == "ask_tutor":
                 ask_intent = client_message["intent"] or "hint"
+                learner_message = client_message.get("message") or ""
+                incoming_history = client_message.get("history") or []
                 logger.info(
                     "Received tutor request for session %s: %s",
                     session_id,
-                    ask_intent,
+                    ask_intent if not learner_message else f"{ask_intent} ({learner_message[:120]})",
                 )
 
                 try:
@@ -520,10 +677,53 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                         db,
                         recent_command_history,
                         tutor_state,
+                        recent_tutor_messages,
                     )
-                    feedback = analyze_tutor_request(ask_intent, ai_context)
+                    conversation_history = (
+                        incoming_history[-8:]
+                        if incoming_history
+                        else recent_tutor_messages[-8:]
+                    )
+                    ai_context["recent_tutor_messages"] = conversation_history
+
+                    if learner_message:
+                        recent_tutor_messages.append(
+                            {
+                                "role": "student",
+                                "content": learner_message[:600],
+                            }
+                        )
+                        recent_tutor_messages = recent_tutor_messages[-12:]
+
+                    feedback = analyze_tutor_request(
+                        ask_intent,
+                        ai_context,
+                        learner_message=learner_message,
+                        conversation_history=conversation_history,
+                    )
                     current_step_task_id = ai_context.get("step_task_id")
                     _update_tutor_state(tutor_state, feedback, current_step_task_id)
+                    feedback["should_append_to_chat"] = _should_append_feedback_to_chat(
+                        feedback,
+                        tutor_delivery_state,
+                    )
+                    if feedback["should_append_to_chat"]:
+                        _record_tutor_feedback(
+                            feedback,
+                            recent_tutor_messages,
+                            tutor_delivery_state,
+                        )
+                        save_tutor_event(
+                            session_id,
+                            current_user.id,
+                            feedback,
+                            ai_context,
+                            learner_message=(
+                                learner_message
+                                or feedback.get("ask_label")
+                                or ask_intent.replace("_", " ")
+                            ),
+                        )
 
                     if not await safe_send_json(
                         websocket,
@@ -553,7 +753,9 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                                 "finding_detected": False,
                                 "finding_confidence": "low",
                                 "finding": None,
-                                "response_origin": "ask_tutor",
+                                "response_origin": (
+                                    "tutor_chat" if learner_message else "ask_tutor"
+                                ),
                                 "ask_intent": ask_intent,
                                 "ask_label": ask_intent.replace("_", " ").title(),
                             },
@@ -607,6 +809,7 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                     db,
                     recent_command_history,
                     tutor_state,
+                    recent_tutor_messages,
                 )
                 feedback = analyze_terminal_interaction(
                     command,
@@ -629,6 +832,22 @@ async def terminal_ws(websocket: WebSocket, session_id: int):
                     )
 
                 _update_tutor_state(tutor_state, feedback, current_step_task_id)
+                feedback["should_append_to_chat"] = _should_append_feedback_to_chat(
+                    feedback,
+                    tutor_delivery_state,
+                )
+                if feedback["should_append_to_chat"]:
+                    _record_tutor_feedback(
+                        feedback,
+                        recent_tutor_messages,
+                        tutor_delivery_state,
+                    )
+                    save_tutor_event(
+                        session_id,
+                        current_user.id,
+                        feedback,
+                        ai_context,
+                    )
 
                 if not await safe_send_json(
                     websocket,

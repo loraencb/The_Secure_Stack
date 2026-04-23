@@ -13,6 +13,12 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 
+    @property
+    def is_instructor(self) -> bool:
+        from .config import settings
+
+        return settings.is_instructor_email(self.email)
+
 
 class AuthToken(Base):
     __tablename__ = "auth_tokens"
@@ -81,3 +87,22 @@ class TaskCompletion(Base):
     ai_feedback = Column(Text, nullable=True)
     ai_confidence = Column(String, nullable=True)
     evidence_quality = Column(String, nullable=True)
+
+
+class TutorEvent(Base):
+    __tablename__ = "tutor_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    lab_id = Column(String, nullable=True, index=True)
+    task_id = Column(String, nullable=True, index=True)
+    step_number = Column(Integer, nullable=True)
+    step_title = Column(String, nullable=True)
+    response_origin = Column(String, nullable=True)
+    tutor_mode = Column(String, nullable=True)
+    intervention_reason = Column(String, nullable=True)
+    ask_intent = Column(String, nullable=True)
+    learner_message = Column(Text, nullable=True)
+    tutor_message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=True)

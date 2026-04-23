@@ -46,6 +46,18 @@ def _parse_cors_origins(value: str | None) -> list[str]:
     return [origin for origin in origins if origin]
 
 
+def _parse_email_set(value: str | None) -> set[str]:
+    if not value:
+        return set()
+
+    emails = {
+        item.strip().lower()
+        for item in value.split(",")
+        if item and item.strip()
+    }
+    return emails
+
+
 def _parse_command(value: str | None, default: list[str]) -> list[str]:
     if not value:
         return default
@@ -63,6 +75,13 @@ def _parse_bool(value: str | None, default: bool) -> bool:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
+    return default
+
+
+def _parse_choice(value: str | None, default: str, choices: set[str]) -> str:
+    normalized = (value or default).strip().lower()
+    if normalized in choices:
+        return normalized
     return default
 
 
@@ -125,6 +144,9 @@ class Settings:
             os.getenv("SECURESTACK_AUTH_TOKEN_TTL_HOURS"),
             24,
         )
+        self.instructor_emails = _parse_email_set(
+            os.getenv("SECURESTACK_INSTRUCTOR_EMAILS")
+        )
         self.password_iterations = _parse_int(
             os.getenv("SECURESTACK_PASSWORD_ITERATIONS"),
             120000,
@@ -148,6 +170,37 @@ class Settings:
             os.getenv("SECURESTACK_OLLAMA_TIMEOUT_SECONDS"),
             60.0,
         )
+        self.openai_tutor_enabled = _parse_bool(
+            os.getenv("OPENAI_TUTOR_ENABLED"),
+            True,
+        )
+        self.openai_api_key = os.getenv("OPENAI_API_KEY", "").strip() or None
+        self.openai_model = (
+            os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip()
+            or "gpt-5.4-mini"
+        )
+        self.openai_org_id = os.getenv("OPENAI_ORG_ID", "").strip() or None
+        self.openai_project_id = os.getenv("OPENAI_PROJECT_ID", "").strip() or None
+        self.openai_timeout_seconds = _parse_float(
+            os.getenv("OPENAI_TIMEOUT_SECONDS"),
+            14.0,
+            minimum=1.0,
+        )
+        self.openai_max_output_tokens = _parse_int(
+            os.getenv("OPENAI_MAX_OUTPUT_TOKENS"),
+            700,
+            minimum=128,
+        )
+        self.openai_reasoning_effort = _parse_choice(
+            os.getenv("OPENAI_REASONING_EFFORT"),
+            "low",
+            {"none", "minimal", "low", "medium", "high", "xhigh"},
+        )
+        self.openai_text_verbosity = _parse_choice(
+            os.getenv("OPENAI_TEXT_VERBOSITY"),
+            "low",
+            {"low", "medium", "high"},
+        )
 
         self.docker_host = os.getenv("SECURESTACK_DOCKER_HOST", "").strip() or None
         self.docker_cli_bin = os.getenv("SECURESTACK_DOCKER_CLI", "docker").strip() or "docker"
@@ -161,6 +214,10 @@ class Settings:
         self.target_ready_timeout_seconds = _parse_float(
             os.getenv("SECURESTACK_TARGET_READY_TIMEOUT_SECONDS"),
             60.0,
+        )
+        self.pull_runtime_images = _parse_bool(
+            os.getenv("SECURESTACK_PULL_RUNTIME_IMAGES"),
+            True,
         )
         self.target_public_host = (
             os.getenv("SECURESTACK_TARGET_PUBLIC_HOST", "localhost").strip()
@@ -208,6 +265,10 @@ class Settings:
                     "SECURESTACK_AUTH_TOKEN_SECRET must be set to a strong non-default value in production."
                 )
 
+    def is_instructor_email(self, email: str | None) -> bool:
+        normalized = (email or "").strip().lower()
+        return bool(normalized and normalized in self.instructor_emails)
+
     def startup_warnings(self) -> list[str]:
         warnings: list[str] = []
 
@@ -242,6 +303,11 @@ class Settings:
         if self.is_production and not self.cleanup_stale_labs_on_startup:
             warnings.append(
                 "Stale lab cleanup on startup is disabled. Ensure ended or broken lab environments are cleaned up by another operational path."
+            )
+
+        if self.is_production and not self.pull_runtime_images:
+            warnings.append(
+                "Automatic lab image pulling is disabled. Ensure all runtime images are preloaded on the Docker host."
             )
 
         return warnings

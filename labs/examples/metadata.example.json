@@ -11,6 +11,14 @@
     "Identify the exposed service on the target.",
     "Capture evidence that supports a basic recon finding."
   ],
+  "pre_lab_context": "This example lab teaches the learner to move from basic connectivity into service validation while paying attention to what each observation actually proves.",
+  "environment_overview": "The attacker container provides basic recon tools, the target exposes one web application, and the final validation step moves into the browser through the forwarded lab URL.",
+  "reflection_prompt": "Which observation most clearly confirmed the target's identity before the browser step, and why?",
+  "lab_takeaways": [
+    "Reachability validation gives later recon results a trustworthy baseline.",
+    "Enumeration identifies which exposed service deserves deeper investigation.",
+    "Application evidence is strongest when you can describe both the service metadata and the visible response."
+  ],
   "prerequisites": [
     "Basic Linux terminal navigation",
     "Familiarity with ICMP, TCP ports, and HTTP"
@@ -79,6 +87,12 @@
       "objective": "Confirm the attacker shell can resolve and reach the target host.",
       "instruction": "Confirm the attacker can reach the target host.",
       "explanation": "Connectivity validation proves the isolated lab network is working before you spend time on deeper enumeration.",
+      "what_to_observe": [
+        "Successful replies from the target",
+        "Zero packet loss"
+      ],
+      "why_observation_matters": "These signals prove the attacker can trust later failures as service or application issues instead of a broken network path.",
+      "learning_takeaway": "This proved the attacker could reach the target before you moved on to deeper recon.",
       "expected_outcome": "You should see successful replies and zero packet loss.",
       "command_hint": "ping -c 3 target",
       "expected_evidence": [
@@ -100,6 +114,12 @@
       "objective": "Discover the exposed service and capture report-ready evidence.",
       "instruction": "Scan the target to identify open ports and services.",
       "explanation": "Enumeration turns basic reachability into actionable evidence about the attack surface.",
+      "what_to_observe": [
+        "The open port",
+        "The identified service or banner"
+      ],
+      "why_observation_matters": "These observations tell the learner what is actually exposed and worth investigating further.",
+      "learning_takeaway": "This step changed a live host into a mapped service with evidence you can report on.",
       "expected_outcome": "The scan should reveal the open service and enough detail to justify deeper validation.",
       "command_hint": "nmap -sV target",
       "expected_evidence": [
@@ -121,6 +141,12 @@
       "objective": "Confirm the service is reachable through the forwarded browser URL.",
       "instruction": "Open the target in your browser.",
       "explanation": "This step links command-line evidence to the learner's actual browser experience.",
+      "what_to_observe": [
+        "The visible application page",
+        "Any browser-visible sign that matches the earlier command evidence"
+      ],
+      "why_observation_matters": "This closes the loop between what the tools reported and what a user would actually reach in the browser.",
+      "learning_takeaway": "This confirmed that the same service you validated in the shell was also reachable through the forwarded browser URL.",
       "expected_outcome": "The application loads in the browser.",
       "command_hint": "http://localhost:{target_port}",
       "hints": [

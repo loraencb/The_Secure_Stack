@@ -34,8 +34,8 @@ export default function HomePage() {
           <div className="hero__eyebrow">Cyber Lab Platform</div>
           <h1>Run guided security labs in one focused workspace.</h1>
           <p>
-            Secure Stack brings together live terminal work, AI review, saved
-            evidence, and session reporting so each lab feels like a real
+            Secure Stack brings together live terminal work, tutor guidance,
+            saved evidence, and session reporting so each lab feels like a real
             investigation.
           </p>
 
@@ -103,7 +103,7 @@ export default function HomePage() {
           <span className="eyebrow">Evidence</span>
           <h2>Findings and reports</h2>
           <p>
-            Capture findings, review AI feedback, and turn the strongest
+            Capture findings, review tutor feedback, and turn the strongest
             evidence into a polished session report.
           </p>
         </article>

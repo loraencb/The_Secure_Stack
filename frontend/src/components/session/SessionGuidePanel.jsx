@@ -47,6 +47,18 @@ function getGuideHints(step) {
   return [];
 }
 
+function getObservationList(step) {
+  if (Array.isArray(step?.what_to_observe) && step.what_to_observe.length) {
+    return step.what_to_observe;
+  }
+
+  if (Array.isArray(step?.expected_evidence) && step.expected_evidence.length) {
+    return step.expected_evidence;
+  }
+
+  return [];
+}
+
 export default function SessionGuidePanel() {
   const {
     activeLabDefinition,
@@ -155,11 +167,14 @@ export default function SessionGuidePanel() {
     ? evidenceQualityMeta[stepProgress.evidence_quality]
     : null;
   const guideHints = getGuideHints(step);
+  const observationList = getObservationList(step);
   const stepExplanation = step.explanation || step.objective || step.instruction;
   const expectedOutcome =
     step.expected_outcome ||
     step.success_criteria?.[0] ||
     "Capture evidence that proves the step objective was satisfied.";
+  const whyObservationMatters =
+    step.why_observation_matters || step.learning_takeaway || "";
   const walkthroughPercent = Math.round(
     ((safeStepIndex + 1) / labSteps.length) * 100
   );
@@ -199,6 +214,20 @@ export default function SessionGuidePanel() {
                     <li key={objective}>{objective}</li>
                   ))}
                 </ul>
+              </div>
+            ) : null}
+
+            {activeLabDefinition?.pre_lab_context ? (
+              <div className="guide-brief-card__stack">
+                <span className="detail-label">Why This Lab Matters</span>
+                <p>{activeLabDefinition.pre_lab_context}</p>
+              </div>
+            ) : null}
+
+            {activeLabDefinition?.environment_overview ? (
+              <div className="guide-brief-card__stack">
+                <span className="detail-label">Environment Overview</span>
+                <p>{activeLabDefinition.environment_overview}</p>
               </div>
             ) : null}
           </div>
@@ -268,7 +297,7 @@ export default function SessionGuidePanel() {
         {!isViewingCurrentStep && summary.activeLabStep ? (
           <div className="callout callout--info">
             <strong>Previewing step {safeStepIndex + 1}.</strong> The active
-            task in the workflow is step {summary.currentLabStepIndex + 1}:{" "}
+            lab focus is step {summary.currentLabStepIndex + 1}:{" "}
             {summary.activeLabStep.title}.
           </div>
         ) : null}
@@ -324,7 +353,7 @@ export default function SessionGuidePanel() {
                 ) : null}
                 {stepProgress?.ai_confidence ? (
                   <p>
-                    <strong>Confidence:</strong> {stepProgress.ai_confidence}
+                    <strong>Tutor confidence:</strong> {stepProgress.ai_confidence}
                   </p>
                 ) : null}
               </div>
@@ -349,14 +378,21 @@ export default function SessionGuidePanel() {
               </div>
             ) : null}
 
-            {step.expected_evidence?.length ? (
+            {observationList.length ? (
               <div className="detail-box">
-                <span className="detail-label">Look For</span>
+                <span className="detail-label">What to Observe</span>
                 <ul className="detail-list">
-                  {step.expected_evidence.map((evidenceItem) => (
-                    <li key={evidenceItem}>{evidenceItem}</li>
+                  {observationList.map((observationItem) => (
+                    <li key={observationItem}>{observationItem}</li>
                   ))}
                 </ul>
+              </div>
+            ) : null}
+
+            {whyObservationMatters ? (
+              <div className="detail-box">
+                <span className="detail-label">Why the Observation Matters</span>
+                <p>{whyObservationMatters}</p>
               </div>
             ) : null}
 
@@ -404,9 +440,16 @@ export default function SessionGuidePanel() {
         <p className="section-lead">{workflow.nextRecommendation.description}</p>
 
         <div className="detail-box detail-box--tertiary">
-          <span className="detail-label">Workflow recommendation</span>
+          <span className="detail-label">Recommended path</span>
           <p>{workflow.nextRecommendation.reason}</p>
         </div>
+
+        {activeLabDefinition?.reflection_prompt ? (
+          <div className="detail-box detail-box--tertiary">
+            <span className="detail-label">End-of-Lab Reflection</span>
+            <p>{activeLabDefinition.reflection_prompt}</p>
+          </div>
+        ) : null}
 
         <div className="session-cta-row">
           <Link

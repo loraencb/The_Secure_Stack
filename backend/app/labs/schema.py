@@ -110,6 +110,14 @@ def validate_and_normalize_lab_metadata(data: dict, metadata_path: Path) -> dict
         "learning_objectives",
         errors,
     )
+    pre_lab_context = _normalize_optional_string(data.get("pre_lab_context"))
+    environment_overview = _normalize_optional_string(data.get("environment_overview"))
+    reflection_prompt = _normalize_optional_string(data.get("reflection_prompt"))
+    lab_takeaways = normalize_text_list(
+        data.get("lab_takeaways"),
+        "lab_takeaways",
+        errors,
+    )
     prerequisites = normalize_text_list(
         data.get("prerequisites"),
         "prerequisites",
@@ -138,6 +146,10 @@ def validate_and_normalize_lab_metadata(data: dict, metadata_path: Path) -> dict
         "category": _normalize_optional_string(data.get("category")) or "General",
         "estimated_duration_minutes": estimated_duration_minutes,
         "learning_objectives": learning_objectives,
+        "pre_lab_context": pre_lab_context,
+        "environment_overview": environment_overview,
+        "reflection_prompt": reflection_prompt,
+        "lab_takeaways": lab_takeaways,
         "prerequisites": prerequisites,
         "required_tools": required_tools,
         "success_criteria": success_criteria,
@@ -542,6 +554,11 @@ def _normalize_tasks(raw_tasks, raw_steps, errors: list[str]) -> list[dict]:
             f"{task_path}.success_criteria",
             errors,
         )
+        normalized_what_to_observe = normalize_text_list(
+            task.get("what_to_observe"),
+            f"{task_path}.what_to_observe",
+            errors,
+        )
         normalized_expected_evidence = normalize_text_list(
             task.get("expected_evidence"),
             f"{task_path}.expected_evidence",
@@ -552,6 +569,16 @@ def _normalize_tasks(raw_tasks, raw_steps, errors: list[str]) -> list[dict]:
         manual_confirmation_label = _normalize_optional_string(
             task.get("manual_confirmation_label")
         )
+        learning_takeaway = _normalize_optional_string(task.get("learning_takeaway"))
+        why_observation_matters = _normalize_optional_string(
+            task.get("why_observation_matters")
+        )
+
+        if not normalized_what_to_observe and normalized_expected_evidence:
+            normalized_what_to_observe = list(normalized_expected_evidence)
+
+        if not why_observation_matters and learning_takeaway:
+            why_observation_matters = learning_takeaway
 
         completion_methods = _normalize_completion_methods(
             task.get("allowed_completion_methods"),
@@ -587,6 +614,9 @@ def _normalize_tasks(raw_tasks, raw_steps, errors: list[str]) -> list[dict]:
                 "objective": objective,
                 "instruction": instruction,
                 "explanation": explanation,
+                "learning_takeaway": learning_takeaway,
+                "what_to_observe": normalized_what_to_observe,
+                "why_observation_matters": why_observation_matters,
                 "expected_outcome": _derive_expected_outcome(
                     task,
                     normalized_success_criteria,

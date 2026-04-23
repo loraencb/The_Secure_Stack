@@ -120,6 +120,7 @@ class SecureStackAuthWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.db = SessionLocal()
         self.db.query(models.AuthToken).delete()
+        self.db.query(models.TutorEvent).delete()
         self.db.query(models.Finding).delete()
         self.db.query(models.TaskCompletion).delete()
         self.db.query(models.Session).delete()

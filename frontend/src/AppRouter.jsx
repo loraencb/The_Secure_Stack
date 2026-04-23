@@ -7,6 +7,7 @@ import { SecureStackProvider } from "./context/SecureStackContext";
 import HomePage from "./pages/HomePage";
 import LabsPage from "./pages/LabsPage";
 import LoginPage from "./pages/Login";
+import InstructorReviewPage from "./pages/InstructorReviewPage";
 import ProfilePage from "./pages/ProfilePage";
 import ReportsPage from "./pages/ReportsPage";
 import SessionPage from "./pages/SessionPage";
@@ -70,6 +71,25 @@ function LoginRoute() {
   return isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />;
 }
 
+function InstructorRoute() {
+  const { authReady, user } = useAuth();
+
+  if (!authReady) {
+    return (
+      <div className="page-stack auth-loading-shell">
+        <section className="surface-card auth-card">
+          <div className="content-stack">
+            <span className="eyebrow">Secure Stack</span>
+            <h1>Loading instructor review</h1>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  return user?.is_instructor ? <InstructorReviewPage /> : <Navigate to="/" replace />;
+}
+
 export default function AppRouter() {
   return (
     <AuthProvider>
@@ -95,6 +115,7 @@ export default function AppRouter() {
           </Route>
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/instructor" element={<InstructorRoute />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

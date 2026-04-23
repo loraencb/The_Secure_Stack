@@ -1,0 +1,136 @@
+{
+  "schema_version": "2026-04",
+  "lab_id": "ideal-course-lab-template",
+  "name": "Ideal Course Lab Template",
+  "description": "A reusable Secure Stack lab template that emphasizes learning by doing, deliberate observation, and end-of-lab reflection.",
+  "difficulty": "Beginner",
+  "category": "Course Lab Template",
+  "estimated_duration_minutes": 35,
+  "learning_objectives": [
+    "Explain what the learner is supposed to understand by the end of the lab.",
+    "Connect each practical step to a meaningful security observation.",
+    "Help the learner move from raw tool output to evidence-backed understanding."
+  ],
+  "pre_lab_context": "Use this section to explain why the lab matters before the learner starts. Frame it like a class assignment, not a checklist.",
+  "environment_overview": "Describe the attacker tools, the target system, and any browser handoff or forwarded service behavior the learner should understand before beginning.",
+  "reflection_prompt": "What observation changed your understanding of the target the most, and why?",
+  "lab_takeaways": [
+    "Summarize the first major lesson the learner should leave with.",
+    "Summarize how the lab connected a command or observation to a concept.",
+    "Summarize what the learner should now understand that they did not understand at the start."
+  ],
+  "prerequisites": [
+    "List the background knowledge needed to succeed.",
+    "Keep prerequisites practical and student-facing."
+  ],
+  "required_tools": [
+    "bash",
+    "ping",
+    "nmap",
+    "curl"
+  ],
+  "success_criteria": [
+    "State what successful completion looks like from the learner's perspective.",
+    "Keep success criteria focused on evidence and understanding, not just clicking through the lab."
+  ],
+  "runtime": {
+    "attacker": {
+      "image": "securestack-attacker:latest",
+      "container_name": "attacker-{session_id}"
+    },
+    "target": {
+      "image": "replace-with-target-image",
+      "container_name": "target-{session_id}",
+      "alias": "target",
+      "app_port": 3000,
+      "ports": {
+        "3000/tcp": null
+      }
+    },
+    "network_name": "lab-net-{session_id}"
+  },
+  "topology": {
+    "summary": "Explain the learning-relevant relationship between the attacker and the target.",
+    "nodes": [
+      {
+        "id": "attacker",
+        "label": "Attacker shell",
+        "role": "attacker",
+        "kind": "container",
+        "details": "Describe what the learner can do from the attacker side."
+      },
+      {
+        "id": "target",
+        "label": "Target service",
+        "role": "target",
+        "kind": "service",
+        "details": "Describe the exposed system or service the learner is investigating."
+      }
+    ],
+    "connections": [
+      {
+        "from": "attacker",
+        "to": "target",
+        "label": "Describe the recon or interaction path."
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "task_id": "step-one",
+      "title": "Step 1 title",
+      "step_type": "command",
+      "objective": "State what the learner must prove or understand in this step.",
+      "instruction": "Give the learner one clear action to perform.",
+      "explanation": "Explain why this step exists and how it sets up the next move.",
+      "what_to_observe": [
+        "List the specific output, header, port, behavior, or visual cue the learner should notice.",
+        "Keep observation prompts concrete and tied to evidence."
+      ],
+      "why_observation_matters": "Explain how the observation changes the learner's understanding of the target or environment.",
+      "learning_takeaway": "Summarize what this completed step proved in one concise sentence.",
+      "expected_outcome": "Describe what a successful outcome should look like.",
+      "command_hint": "replace-with-guided-command",
+      "expected_evidence": [
+        "Replace with expected evidence markers."
+      ],
+      "hints": [
+        "Use hints to keep the learner moving without giving away everything immediately."
+      ],
+      "allowed_completion_methods": [
+        "command_match",
+        "evidence_match"
+      ],
+      "success_criteria": [
+        "State how the learner knows the step is complete."
+      ],
+      "remediation_text": "Explain how to recover if the learner does not see the expected signal."
+    },
+    {
+      "task_id": "step-two",
+      "title": "Observation or browser confirmation step",
+      "step_type": "browser",
+      "objective": "Use this for browser-visible validation when it strengthens the lesson.",
+      "instruction": "Open the forwarded browser URL and confirm the expected behavior.",
+      "explanation": "Explain why the learner is moving from the terminal into the browser.",
+      "what_to_observe": [
+        "Describe what should be visible in the browser."
+      ],
+      "why_observation_matters": "Explain why the browser-visible result matters in addition to the terminal evidence.",
+      "learning_takeaway": "Summarize what the browser confirmation added to the lab understanding.",
+      "expected_outcome": "Describe the successful browser-facing result.",
+      "command_hint": "http://localhost:{target_port}",
+      "hints": [
+        "Use the launcher-provided URL instead of guessing the host port."
+      ],
+      "allowed_completion_methods": [
+        "manual_confirmation"
+      ],
+      "manual_confirmation_label": "Mark Browser Step Complete",
+      "success_criteria": [
+        "State the browser-visible condition that confirms success."
+      ],
+      "remediation_text": "Explain what to verify if the browser step does not work."
+    }
+  ]
+}

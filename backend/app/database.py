@@ -22,6 +22,7 @@ REQUIRED_TABLES = {
     "sessions",
     "findings",
     "task_completions",
+    "tutor_events",
 }
 
 engine_kwargs = {

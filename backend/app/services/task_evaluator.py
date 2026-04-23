@@ -1,4 +1,5 @@
 import re
+import shlex
 
 from app.labs.labs_config import LABS
 
@@ -26,8 +27,73 @@ def command_matches_hint(command: str, hint: str) -> bool:
     if normalized_command == normalized_hint:
         return True
 
-    keyword = normalized_hint.split()[0]
-    return bool(keyword) and normalized_command.startswith(f"{keyword} ")
+    command_tokens = _safe_split(normalized_command)
+    hint_tokens = _safe_split(normalized_hint)
+    if not command_tokens or not hint_tokens:
+        return False
+
+    if command_tokens[0] != hint_tokens[0]:
+        return False
+
+    if len(hint_tokens) == 1:
+        return True
+
+    required_markers = _extract_required_markers(hint_tokens[1:])
+    if not required_markers:
+        return True
+
+    command_tail = command_tokens[1:]
+    return all(
+        any(_token_matches_marker(token, marker) for token in command_tail)
+        for marker in required_markers
+    )
+
+
+def _safe_split(value: str) -> list[str]:
+    try:
+        return [token.strip().lower() for token in shlex.split(value or "") if token.strip()]
+    except ValueError:
+        return [token.strip().lower() for token in (value or "").split() if token.strip()]
+
+
+def _extract_required_markers(tokens: list[str]) -> list[str]:
+    required = []
+    skip_next_numeric = False
+
+    for token in tokens:
+        if not token:
+            continue
+
+        if skip_next_numeric and token.isdigit():
+            skip_next_numeric = False
+            continue
+
+        skip_next_numeric = False
+        if token in {"-c", "--count"}:
+            required.append(token)
+            skip_next_numeric = True
+            continue
+
+        if token.startswith("-"):
+            required.append(token)
+            continue
+
+        if token.isdigit():
+            continue
+
+        required.append(token)
+
+    return required
+
+
+def _token_matches_marker(token: str, marker: str) -> bool:
+    if token == marker:
+        return True
+
+    if marker.startswith(("http://", "https://")):
+        return token.startswith(marker)
+
+    return marker in token
 
 
 def _match_expected_signal(task_id: str, expected_signal: str, output: str) -> bool:

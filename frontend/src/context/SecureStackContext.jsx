@@ -29,6 +29,7 @@ import {
   setStoredSessionId,
   sortFindings,
 } from "../utils/session";
+import { buildStepTakeaway } from "../utils/learning";
 import {
   getDefaultWorkflowState,
   getSessionWorkflow,
@@ -38,6 +39,84 @@ import {
 import { mergeFindingEvidenceContext } from "../utils/findings";
 
 const SecureStackContext = createContext(null);
+
+const TUTOR_ASK_LABELS = {
+  hint: "Give me a hint",
+  explain: "Explain this step",
+  stuck: "I'm stuck",
+  what_next: "What should I do next?",
+};
+
+function buildTutorConversationId(prefix = "tutor") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function getTutorConversationTitle(feedback = {}) {
+  if (feedback.response_origin === "proactive_tutor") {
+    if (feedback.intervention_reason === "idle_nudge") {
+      return "Check-in";
+    }
+
+    if (feedback.intervention_reason === "off_track_redirect") {
+      return "Course correction";
+    }
+
+    if (feedback.intervention_reason === "browser_handoff_guidance") {
+      return "Browser handoff";
+    }
+
+    return "";
+  }
+
+  if (feedback.response_origin === "command_review") {
+    return "";
+  }
+
+  if (feedback.response_origin === "tutor_chat") {
+    return "";
+  }
+
+  if (feedback.ask_label) {
+    return "";
+  }
+
+  return "";
+}
+
+function buildTutorConversationEntryFromFeedback(feedback = {}) {
+  const responseOrigin = feedback.response_origin || "";
+  const shouldAppend =
+    responseOrigin === "ask_tutor" ||
+    responseOrigin === "tutor_chat" ||
+    Boolean(feedback.should_append_to_chat);
+  if (!shouldAppend) {
+    return null;
+  }
+
+  const content = feedback.explanation?.trim();
+  if (!content) {
+    return null;
+  }
+
+  return {
+    id: buildTutorConversationId("assistant"),
+    role: "tutor",
+    origin: responseOrigin || "command_review",
+    title: getTutorConversationTitle(feedback),
+    content,
+    detail: feedback.security_relevance || "",
+    nextStep: feedback.next_step || "",
+    learningReinforcement: feedback.learning_reinforcement || "",
+    warning: feedback.warning || "",
+    interventionLabel: feedback.intervention_label || "",
+    askIntent: feedback.ask_intent || "",
+    askLabel: feedback.ask_label || "",
+    hintLabel: feedback.hint_label || "",
+    tutorMode: feedback.tutor_mode || "",
+    assessment: feedback.assessment || "",
+    createdAt: new Date().toISOString(),
+  };
+}
 
 function buildPersistedLabInfo(sessionRecord) {
   if (!sessionRecord?.environment_launched_at) {
@@ -51,6 +130,37 @@ function buildPersistedLabInfo(sessionRecord) {
     target_container: sessionRecord.target_container || null,
     network_name: sessionRecord.network_name || null,
     browser_url: sessionRecord.browser_url || null,
+  };
+}
+
+function buildTutorLearningEntry({
+  title = "Learning reinforcement",
+  content = "",
+  detail = "",
+  nextStep = "",
+}) {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) {
+    return null;
+  }
+
+  return {
+    id: buildTutorConversationId("assistant"),
+    role: "tutor",
+    origin: "proactive_tutor",
+    title,
+    content: trimmedContent,
+    detail: detail.trim(),
+    nextStep: nextStep.trim(),
+    learningReinforcement: trimmedContent,
+    warning: "",
+    interventionLabel: "Learning reinforcement",
+    askIntent: "",
+    askLabel: "",
+    hintLabel: "Learning reinforcement",
+    tutorMode: "success_explanation",
+    assessment: "useful",
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -81,6 +191,10 @@ export function SecureStackProvider({ children }) {
   const [taskProgress, setTaskProgress] = useState({});
   const [sessionSyncing, setSessionSyncing] = useState(false);
   const [sessionLoadError, setSessionLoadError] = useState("");
+  const [tutorPending, setTutorPending] = useState({
+    active: false,
+    source: "",
+  });
   const [findingForm, setFindingForm] = useState({
     title: "",
     severity: "Medium",
@@ -160,6 +274,10 @@ export function SecureStackProvider({ children }) {
     if (!sessionId) {
       setWorkflowStateSessionId(null);
       setWorkflowState(getDefaultWorkflowState());
+      setTutorPending({
+        active: false,
+        source: "",
+      });
       return;
     }
 
@@ -292,12 +410,91 @@ export function SecureStackProvider({ children }) {
     sessionRecord,
     summary,
     labSteps,
+    labDefinition: activeLabDefinition,
     labInfo,
     report,
     findings,
     taskProgress,
     workflowState,
   });
+
+  const appendTutorConversationEntries = useCallback((entries) => {
+    const safeEntries = (Array.isArray(entries) ? entries : [entries]).filter(
+      (entry) =>
+        entry &&
+        typeof entry.content === "string" &&
+        entry.content.trim() &&
+        typeof entry.role === "string" &&
+        entry.role.trim()
+    );
+
+    if (!safeEntries.length) {
+      return;
+    }
+
+    setWorkflowState((prev) => ({
+      ...prev,
+      tutorConversation: [...(prev.tutorConversation || []), ...safeEntries].slice(
+        -40
+      ),
+    }));
+  }, []);
+
+  const appendTutorLearningMoment = useCallback(
+    ({ title = "Learning reinforcement", content = "", detail = "", nextStep = "" }) => {
+      const entry = buildTutorLearningEntry({
+        title,
+        content,
+        detail,
+        nextStep,
+      });
+
+      if (!entry) {
+        return;
+      }
+
+      appendTutorConversationEntries(entry);
+    },
+    [appendTutorConversationEntries]
+  );
+
+  useEffect(() => {
+    if (
+      !sessionId ||
+      !workflow.labCompleted ||
+      !workflow.labDebrief ||
+      workflow.labDebriefShownAt
+    ) {
+      return;
+    }
+
+    appendTutorLearningMoment({
+      title: "Lab debrief",
+      content: workflow.labDebrief.summary,
+      detail:
+        workflow.labDebrief.takeawayList?.[0] ||
+        "Review the completed steps to connect the evidence trail to the lab objective.",
+      nextStep:
+        workflow.nextRecommendation?.description ||
+        workflow.labDebrief.reflectionPrompt ||
+        "",
+    });
+
+    setWorkflowState((prev) => ({
+      ...prev,
+      labDebriefShownAt: new Date().toISOString(),
+    }));
+  }, [
+    appendTutorLearningMoment,
+    sessionId,
+    workflow.labCompleted,
+    workflow.labDebrief,
+    workflow.labDebriefShownAt,
+    workflow.labDebrief?.summary,
+    workflow.labDebrief?.takeawayList,
+    workflow.labDebrief?.reflectionPrompt,
+    workflow.nextRecommendation?.description,
+  ]);
 
   async function ensureLabDefinition(labId = activeLabId) {
     const existing = labDefinitions[labId];
@@ -494,9 +691,9 @@ export function SecureStackProvider({ children }) {
         const cleanupStatus = cleanup?.status;
         setMessage(
           cleanupStatus === "partial"
-            ? "Environment cleanup finished with warnings. Check the logs if resources remain."
+            ? "Environment cleanup finished with warnings. Some lab resources may still need attention."
             : cleanupStatus === "deferred"
-            ? "Runtime state was cleared, but Docker cleanup was deferred because the container runtime is unavailable."
+            ? "The lab was marked inactive, but cleanup will finish when the lab environment is reachable again."
             : cleanupStatus === "noop"
             ? "No active lab resources were found for this session."
             : "Environment cleaned up."
@@ -570,7 +767,7 @@ export function SecureStackProvider({ children }) {
         cleanupStatus === "partial"
           ? `Session ${currentSessionId} ended, but environment cleanup reported warnings.`
           : cleanupStatus === "deferred"
-          ? `Session ${currentSessionId} ended. Runtime state was cleared, and Docker cleanup will retry when the runtime is available again.`
+          ? `Session ${currentSessionId} ended. Lab cleanup will finish when the environment is reachable again.`
           : `Session ${currentSessionId} ended and the environment was cleaned up.`
       );
 
@@ -634,7 +831,59 @@ export function SecureStackProvider({ children }) {
 
   function handleTerminalFeedback(feedback) {
     setTerminalFeedback(feedback);
+
+    if (!feedback) {
+      return;
+    }
+
+    const conversationEntry = buildTutorConversationEntryFromFeedback(feedback);
+    if (conversationEntry) {
+      appendTutorConversationEntries(conversationEntry);
+    }
   }
+
+  const handleTutorPendingChange = useCallback((nextPending) => {
+    if (!nextPending || nextPending.active === false) {
+      setTutorPending({
+        active: false,
+        source: "",
+      });
+      return;
+    }
+
+    setTutorPending({
+      active: true,
+      source: nextPending.source || "",
+    });
+  }, []);
+
+  const recordTutorQuestion = useCallback(
+    ({ content = "", intent = "", label = "" }) => {
+      const trimmedContent = content.trim();
+      if (!trimmedContent) {
+        return;
+      }
+
+      appendTutorConversationEntries({
+        id: buildTutorConversationId("student"),
+        role: "student",
+        origin: "tutor_request",
+        title: "",
+        content: trimmedContent,
+        detail: "",
+        nextStep: "",
+        learningReinforcement: "",
+        warning: "",
+        askIntent: intent || "",
+        askLabel: label || TUTOR_ASK_LABELS[intent] || "",
+        hintLabel: "",
+        tutorMode: "",
+        assessment: "",
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [appendTutorConversationEntries]
+  );
 
   const recordVisitedSection = useCallback((sectionSlug) => {
     if (!sectionSlug) {
@@ -698,7 +947,7 @@ export function SecureStackProvider({ children }) {
       ].slice(-12),
     }));
     setFindingSuggestion(null);
-    setMessage(`AI auto-saved finding: ${savedFinding.title}`);
+    setMessage(`Tutor saved a finding: ${savedFinding.title}`);
   }
 
   async function handleCommandResult({ command, output, feedback }) {
@@ -751,7 +1000,7 @@ export function SecureStackProvider({ children }) {
     }
 
     try {
-      await persistTaskCompletion({
+      const savedProgress = await persistTaskCompletion({
         task: summary.activeLabStep,
         status: "completed",
         completionMethod: "manual_confirmation",
@@ -763,6 +1012,33 @@ export function SecureStackProvider({ children }) {
         aiConfidence: "high",
         evidenceQuality: "strong",
       });
+      const stepTakeaway = buildStepTakeaway({
+        step: summary.activeLabStep,
+        progress: savedProgress,
+        stepNumber: summary.currentLabStepIndex + 1,
+        totalSteps: summary.totalSteps,
+        nextStep: labSteps[summary.currentLabStepIndex + 1] || null,
+      });
+
+      if (
+        stepTakeaway &&
+        !workflowState.reinforcedStepIds?.includes(summary.activeLabStep.task_id)
+      ) {
+        appendTutorLearningMoment({
+          title: `Step ${stepTakeaway.stepNumber} learning moment`,
+          content: stepTakeaway.summary,
+          detail: stepTakeaway.whyItMattered,
+          nextStep: stepTakeaway.nextConnection,
+        });
+        setWorkflowState((prev) => ({
+          ...prev,
+          reinforcedStepIds: [
+            ...(prev.reinforcedStepIds || []),
+            summary.activeLabStep.task_id,
+          ].slice(-24),
+        }));
+      }
+
       setMessage(`Step ${summary.currentLabStepIndex + 1} completed.`);
     } catch (error) {
       console.error("Browser step persistence error:", error);
@@ -1009,6 +1285,8 @@ export function SecureStackProvider({ children }) {
     findingForm,
     summary,
     workflow,
+    tutorPending,
+    recordTutorQuestion,
     selectLab,
     startNewSession,
     setSessionFromRoute,
@@ -1017,6 +1295,7 @@ export function SecureStackProvider({ children }) {
     resetActiveLab,
     endCurrentSession,
     handleTerminalFeedback,
+    handleTutorPendingChange,
     handleCommandSubmitted,
     clearFeedback,
     handleFindingSuggestion,

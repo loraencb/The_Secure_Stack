@@ -118,6 +118,16 @@ export async function getSessionHistory() {
   return parseJsonResponse(res);
 }
 
+export async function getInstructorReviewSessions() {
+  const res = await apiFetch("/instructor/review/sessions");
+  return parseJsonResponse(res);
+}
+
+export async function getInstructorReviewSession(sessionId) {
+  const res = await apiFetch(`/instructor/review/sessions/${sessionId}`);
+  return parseJsonResponse(res);
+}
+
 export async function endSession(sessionId) {
   const res = await apiFetch(`/sessions/end/${sessionId}`, {
     method: "POST",

@@ -57,6 +57,115 @@ class LabSchemaTests(unittest.TestCase):
         self.assertGreater(len(normalized["tasks"]), 0)
         self.assertEqual(normalized["tasks"][0]["step_number"], 1)
         self.assertTrue(normalized["topology"]["nodes"])
+        self.assertTrue(normalized["lab_takeaways"])
+        self.assertTrue(normalized["pre_lab_context"])
+        self.assertTrue(normalized["environment_overview"])
+        self.assertTrue(normalized["reflection_prompt"])
+        self.assertTrue(normalized["tasks"][0]["learning_takeaway"])
+        self.assertTrue(normalized["tasks"][0]["what_to_observe"])
+        self.assertTrue(normalized["tasks"][0]["why_observation_matters"])
+        self.assertEqual(
+            normalized["tasks"][2]["command_hint"],
+            "curl -i http://target:3000",
+        )
+
+    def test_current_http_service_mapping_lab_loads_cleanly(self):
+        normalized = load_lab_metadata(metadata_path("http-service-mapping"))
+
+        self.assertEqual(normalized["lab_id"], "http-service-mapping")
+        self.assertEqual(normalized["target"]["app_port"], 80)
+        self.assertGreater(len(normalized["tasks"]), 0)
+        self.assertEqual(normalized["tasks"][0]["step_number"], 1)
+        self.assertTrue(normalized["topology"]["connections"])
+        self.assertTrue(normalized["lab_takeaways"])
+        self.assertTrue(normalized["pre_lab_context"])
+        self.assertTrue(normalized["environment_overview"])
+        self.assertTrue(normalized["reflection_prompt"])
+        self.assertTrue(normalized["tasks"][2]["learning_takeaway"])
+        self.assertTrue(normalized["tasks"][2]["what_to_observe"])
+        self.assertTrue(normalized["tasks"][2]["why_observation_matters"])
+
+    def test_course_labs_share_core_teaching_fields(self):
+        for lab_name in ("juice-shop-recon", "http-service-mapping"):
+            normalized = load_lab_metadata(metadata_path(lab_name))
+
+            self.assertTrue(normalized["pre_lab_context"])
+            self.assertTrue(normalized["environment_overview"])
+            self.assertTrue(normalized["reflection_prompt"])
+            self.assertTrue(normalized["lab_takeaways"])
+
+            for task in normalized["tasks"]:
+                self.assertTrue(
+                    task["learning_takeaway"],
+                    f"{lab_name}:{task['task_id']} is missing learning_takeaway",
+                )
+                self.assertTrue(
+                    task["what_to_observe"],
+                    f"{lab_name}:{task['task_id']} is missing what_to_observe",
+                )
+                self.assertTrue(
+                    task["why_observation_matters"],
+                    f"{lab_name}:{task['task_id']} is missing why_observation_matters",
+                )
+
+    def test_learning_takeaway_lab_takeaways_and_observation_fields_are_normalized(self):
+        payload = build_base_lab(
+            pre_lab_context="This lab matters because it teaches disciplined recon.",
+            environment_overview="One attacker investigates one target service.",
+            reflection_prompt="Which observation mattered most, and why?",
+            lab_takeaways=[
+                "Reachability validation gives later recon a trustworthy baseline."
+            ],
+            tasks=[
+                {
+                    "task_id": "verify-connectivity",
+                    "title": "Verify connectivity",
+                    "step_type": "command",
+                    "objective": "Confirm reachability.",
+                    "instruction": "Confirm reachability.",
+                    "command_hint": "ping -c 3 target",
+                    "hint_text": "Use the target hostname.",
+                    "expected_evidence": ["0% packet loss"],
+                    "learning_takeaway": "This proved the target was reachable.",
+                    "what_to_observe": ["Successful replies", "0% packet loss"],
+                    "why_observation_matters": "These signals prove the path is working.",
+                }
+            ],
+        )
+
+        normalized = validate_and_normalize_lab_metadata(
+            payload,
+            metadata_path("juice-shop-recon"),
+        )
+
+        self.assertEqual(
+            normalized["lab_takeaways"],
+            ["Reachability validation gives later recon a trustworthy baseline."],
+        )
+        self.assertEqual(
+            normalized["tasks"][0]["learning_takeaway"],
+            "This proved the target was reachable.",
+        )
+        self.assertEqual(
+            normalized["pre_lab_context"],
+            "This lab matters because it teaches disciplined recon.",
+        )
+        self.assertEqual(
+            normalized["environment_overview"],
+            "One attacker investigates one target service.",
+        )
+        self.assertEqual(
+            normalized["reflection_prompt"],
+            "Which observation mattered most, and why?",
+        )
+        self.assertEqual(
+            normalized["tasks"][0]["what_to_observe"],
+            ["Successful replies", "0% packet loss"],
+        )
+        self.assertEqual(
+            normalized["tasks"][0]["why_observation_matters"],
+            "These signals prove the path is working.",
+        )
 
     def test_legacy_aliases_normalize_into_current_model(self):
         payload = build_base_lab(
@@ -86,6 +195,10 @@ class LabSchemaTests(unittest.TestCase):
         self.assertEqual(normalized["target"]["ports"], {"3000/tcp": None})
         self.assertEqual(normalized["tasks"][0]["step_number"], 1)
         self.assertEqual(normalized["tasks"][0]["instruction"], "Confirm reachability.")
+        self.assertEqual(
+            normalized["tasks"][0]["what_to_observe"],
+            [],
+        )
         self.assertEqual(normalized["topology"]["nodes"][0]["id"], "attacker")
 
     def test_invalid_topology_connection_fails_with_clear_error(self):

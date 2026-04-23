@@ -7,6 +7,7 @@ Secure Stack can now run in a containerized setup with a production-style backen
 - Docker Engine / Docker Desktop
 - Docker Compose
 - Optional: Ollama running on the host if you want live AI summaries
+- Optional: an OpenAI API key if you want the deep tutor path to use the Responses API
 
 ## 1. Configure environment variables
 
@@ -24,16 +25,34 @@ Important values to review:
 - `SECURESTACK_RUN_MIGRATIONS_ON_STARTUP`
 - `SECURESTACK_AUTO_CREATE_SCHEMA`
 - `SECURESTACK_CORS_ORIGINS`
+- `SECURESTACK_INSTRUCTOR_EMAILS`
 - `SECURESTACK_OLLAMA_URL`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 - `SECURESTACK_TARGET_PUBLIC_HOST`
 - `SECURESTACK_TARGET_PROBE_HOST`
+- `SECURESTACK_PULL_RUNTIME_IMAGES`
 
 If Ollama runs on the same host machine as Docker, the default `host.docker.internal` value works for Docker Desktop and Linux setups with `host-gateway`.
+
+OpenAI is backend-only. Set `OPENAI_API_KEY` in `.env` or your deployment secret manager, never in frontend code. The backend uses OpenAI only for deep tutor requests such as explanation, stuck support, richer conceptual questions, and reflection-style prompts. Missing keys, API failures, timeouts, or malformed model output fall back to the local tutor response and log a backend warning.
+The websocket tutor path currently returns final OpenAI-enriched responses rather than streaming token deltas; the frontend's existing pending state stays active while the backend waits.
+
+Useful OpenAI settings:
+
+- `OPENAI_TUTOR_ENABLED=1`
+- `OPENAI_API_KEY=`
+- `OPENAI_MODEL=gpt-5.4-mini`
+- `OPENAI_TIMEOUT_SECONDS=14`
+- `OPENAI_REASONING_EFFORT=low`
+- `OPENAI_TEXT_VERBOSITY=low`
 
 For lab launches in Docker Compose:
 
 - `SECURESTACK_TARGET_PUBLIC_HOST` should stay `localhost` so the browser can open the published target port.
 - `SECURESTACK_TARGET_PROBE_HOST` should be `host.docker.internal` so the backend container can probe the published host port during environment startup.
+- `SECURESTACK_PULL_RUNTIME_IMAGES=1` lets Secure Stack pull first-use lab target images like `nginx:alpine` automatically. Set it to `0` only if your deployment host is offline and you preload every lab image yourself.
+- `SECURESTACK_INSTRUCTOR_EMAILS` can be set to a comma-separated list such as `ta@example.com,professor@example.com` to enable the lightweight instructor review route at `/instructor`.
 
 ## 2. Start the stack
 

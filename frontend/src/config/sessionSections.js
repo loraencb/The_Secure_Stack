@@ -5,7 +5,7 @@ export const SESSION_SECTIONS = [
     label: "Overview",
     phase: "Orient",
     description:
-      "Start here to understand the lab objective, session pulse, and runtime context before acting.",
+      "Start here to understand the lab objective, current setup, and next move before acting.",
   },
   {
     step: 2,
@@ -21,7 +21,7 @@ export const SESSION_SECTIONS = [
     label: "Workspace",
     phase: "Validate",
     description:
-      "Run commands in the live environment, inspect output, and use AI review to confirm progress.",
+      "Run commands in the live environment, inspect output, and use the tutor to confirm progress.",
   },
   {
     step: 4,

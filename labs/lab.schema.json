@@ -47,6 +47,25 @@
         "type": "string"
       }
     },
+    "pre_lab_context": {
+      "type": "string",
+      "description": "Optional short framing that explains why the lab matters before the learner starts."
+    },
+    "environment_overview": {
+      "type": "string",
+      "description": "Optional summary of the attacker, target, and environment assumptions for the learner."
+    },
+    "reflection_prompt": {
+      "type": "string",
+      "description": "Optional end-of-lab reflection prompt used in the debrief."
+    },
+    "lab_takeaways": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional end-of-lab teaching takeaways used in the final debrief."
+    },
     "objectives": {
       "type": "array",
       "items": {
@@ -310,6 +329,28 @@
         },
         "explanation": {
           "type": "string"
+        },
+        "learning_takeaway": {
+          "type": "string",
+          "description": "Optional short teaching reinforcement shown after the learner completes the step."
+        },
+        "what_to_observe": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Optional observation checklist that tells the learner what output or behavior matters in this step."
+        },
+        "why_observation_matters": {
+          "type": "string",
+          "description": "Optional explanation of why the key observation matters for the lab objective."
         },
         "expected_outcome": {
           "type": "string"

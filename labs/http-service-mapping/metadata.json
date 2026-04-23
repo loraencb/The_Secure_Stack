@@ -1,0 +1,261 @@
+{
+  "lab_id": "http-service-mapping",
+  "name": "HTTP Service Mapping Lab",
+  "description": "Map and validate an exposed Nginx web service from an isolated attacker container, moving from reachability checks to banner analysis, HTTP response inspection, and browser confirmation.",
+  "difficulty": "Beginner",
+  "category": "Service Enumeration",
+  "estimated_duration_minutes": 30,
+  "learning_objectives": [
+    "Confirm that the attacker can reach the target over the isolated lab network.",
+    "Enumerate the exposed web service and identify the listening port and banner.",
+    "Inspect HTTP response headers to understand what the service is exposing before opening a browser.",
+    "Capture both terminal and browser evidence that the reachable service is Nginx."
+  ],
+  "pre_lab_context": "This lab is designed to teach disciplined web-service recon. Instead of jumping straight into a browser, you move from reachability to service discovery, then to HTTP metadata, then to content, and finally to browser confirmation. Each stage should reduce uncertainty about what the target is and what evidence you can trust.",
+  "environment_overview": "You work from an attacker shell with ping, nmap, and curl available. The target is a simple Nginx web service on TCP 80 inside the isolated lab network, and the launcher also exposes it through a forwarded browser URL so you can compare terminal observations with the visible page.",
+  "reflection_prompt": "Before you opened the browser, which terminal-side observation most strongly confirmed the target was Nginx, and what did the browser step add that the terminal evidence alone did not?",
+  "lab_takeaways": [
+    "Reachability checks establish a clean starting point before deeper service analysis and make later failures easier to interpret.",
+    "Enumeration and banner analysis reveal which services are actually exposed and where the lab should focus next.",
+    "HTTP headers and page content provide different layers of evidence about a web service's identity and behavior.",
+    "Browser confirmation closes the loop between terminal-based recon and the visible user-facing result."
+  ],
+  "prerequisites": [
+    "Basic Linux terminal navigation",
+    "Awareness of ICMP, TCP services, and HTTP response structure",
+    "Understanding that the lab environment is for authorized educational use only"
+  ],
+  "required_tools": [
+    "bash",
+    "ping",
+    "nmap",
+    "curl"
+  ],
+  "success_criteria": [
+    "The learner confirms reachability from the attacker shell.",
+    "The learner identifies TCP 80 and the Nginx service banner.",
+    "The learner captures HTTP headers that confirm the service identity.",
+    "The learner validates the landing page through both terminal output and browser confirmation."
+  ],
+  "topology": {
+    "summary": "An attacker shell investigates one exposed Nginx web service across an isolated lab network before confirming the browser-facing result.",
+    "nodes": [
+      {
+        "id": "attacker",
+        "label": "Attacker shell",
+        "role": "attacker",
+        "kind": "container",
+        "details": "Run network and HTTP recon commands from this shell."
+      },
+      {
+        "id": "target",
+        "label": "Nginx web target",
+        "role": "target",
+        "kind": "web-service",
+        "details": "Hosts a simple HTTP service on TCP 80 for banner and response inspection."
+      }
+    ],
+    "connections": [
+      {
+        "from": "attacker",
+        "to": "target",
+        "label": "ICMP, TCP 80, and HTTP analysis path"
+      }
+    ]
+  },
+  "manuals": {
+    "student": "student_manual.md",
+    "instructor": "instructor_guide.md"
+  },
+  "runtime": {
+    "attacker": {
+      "image": "securestack-attacker:latest",
+      "container_name": "attacker-{session_id}"
+    },
+    "target": {
+      "image": "nginx:alpine",
+      "container_name": "target-{session_id}",
+      "ports": {
+        "80/tcp": null
+      },
+      "app_port": 80,
+      "alias": "target"
+    },
+    "network_name": "lab-net-{session_id}"
+  },
+  "tasks": [
+    {
+      "task_id": "verify-connectivity",
+      "title": "Verify connectivity",
+      "step_type": "command",
+      "objective": "Confirm that the attacker container can resolve and reach the target host before deeper enumeration.",
+      "instruction": "Use a small ICMP probe to verify the target is reachable from the attacker shell.",
+      "explanation": "This opening step keeps the lab disciplined. Before you interpret a port scan or an HTTP response, you need to know the attacker can actually resolve the lab hostname and send traffic to the target successfully.",
+      "what_to_observe": [
+        "The target hostname resolves cleanly from the attacker shell.",
+        "Successful ICMP replies arrive from the target.",
+        "The summary shows zero packet loss."
+      ],
+      "why_observation_matters": "These signals prove the basic lab path is working, which means later failures can be interpreted as service behavior instead of a broken network path.",
+      "learning_takeaway": "This proved the attacker could reach the target cleanly, so later service and HTTP observations could be trusted instead of blamed on a broken path.",
+      "expected_outcome": "The output should show successful replies and zero packet loss, confirming that the target alias resolves and the target responds over the isolated network.",
+      "command_hint": "ping -c 3 target",
+      "expected_evidence": [
+        "icmp_seq",
+        "0% packet loss"
+      ],
+      "hints": [
+        "Use the `target` hostname from the attacker shell instead of guessing an IP address.",
+        "A short probe count is enough. You only need evidence that the path is working."
+      ],
+      "allowed_completion_methods": [
+        "command_match"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Use the `target` hostname from the attacker shell.",
+      "remediation_text": "If the probe fails, confirm the environment launched and the attacker and target are still attached to the lab network.",
+      "success_criteria": [
+        "The target responds to ICMP requests from the attacker shell."
+      ]
+    },
+    {
+      "task_id": "identify-http-service",
+      "title": "Identify the exposed web service",
+      "step_type": "command",
+      "objective": "Enumerate the target so you can confirm the listening service and its banner.",
+      "instruction": "Run a version-detection scan against the target.",
+      "explanation": "Service enumeration turns generic reachability into actionable attack-surface knowledge. This step is not just about seeing an open port. It is about identifying what is behind that port and deciding whether the next step should stay in the terminal or move toward application inspection.",
+      "what_to_observe": [
+        "TCP 80 reported as open.",
+        "The service identified as HTTP or Nginx.",
+        "Any version or banner detail that helps you explain what is listening there."
+      ],
+      "why_observation_matters": "These observations transform a reachable host into a mapped service. They tell you both where to focus and what kind of application behavior you should expect next.",
+      "learning_takeaway": "This step turned a reachable host into a mapped service by proving which port was open and which server family was answering there.",
+      "expected_outcome": "The scan should show TCP 80 as open and identify the exposed service as Nginx.",
+      "command_hint": "nmap -sV target",
+      "expected_evidence": [
+        "80/tcp open",
+        "nginx"
+      ],
+      "hints": [
+        "Use version detection so the scan output carries reporting value beyond just an open port.",
+        "If the service is still booting, wait briefly and rerun the scan instead of changing the target."
+      ],
+      "allowed_completion_methods": [
+        "command_match",
+        "evidence_match"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Use version detection so the output tells you more than just that a port is open.",
+      "remediation_text": "If TCP 80 does not appear, confirm the target container is running and rescanning the correct host alias.",
+      "success_criteria": [
+        "The learner captures evidence that TCP 80 is open and backed by Nginx."
+      ]
+    },
+    {
+      "task_id": "inspect-http-headers",
+      "title": "Inspect HTTP headers",
+      "step_type": "command",
+      "objective": "Confirm the service identity by inspecting an HTTP response rather than relying only on the port scan.",
+      "instruction": "Request only the HTTP headers from the target service.",
+      "explanation": "HTTP headers reveal service behavior without pulling the full page body. That makes this a strong middle step: you move beyond the port scan, but you still focus on compact response metadata before reading the full page content.",
+      "what_to_observe": [
+        "The HTTP status line.",
+        "The `Server: nginx` header.",
+        "Any other response metadata that confirms the service is behaving like a normal web server."
+      ],
+      "why_observation_matters": "Headers provide service identity with lightweight evidence. They let you verify what is responding before you rely on a browser or a full page body.",
+      "learning_takeaway": "Header inspection let you confirm the service identity with lightweight evidence before moving on to the full response body or browser view.",
+      "expected_outcome": "The response should return an HTTP 200 status and a `Server: nginx` header.",
+      "command_hint": "curl -I http://target",
+      "expected_evidence": [
+        "HTTP/1.1 200 OK",
+        "Server: nginx"
+      ],
+      "hints": [
+        "Use the header-only form of `curl` so you can focus on status and banner information first.",
+        "You are not trying to scrape the full page yet. Start with the response metadata."
+      ],
+      "allowed_completion_methods": [
+        "command_match",
+        "evidence_match"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Use the header-only form of `curl` to inspect the response metadata first.",
+      "remediation_text": "If you do not get a 200 response, revisit the scan results and verify you are sending the request to the web service on the target host.",
+      "success_criteria": [
+        "The learner captures a successful HTTP response that identifies Nginx in the headers."
+      ]
+    },
+    {
+      "task_id": "fingerprint-landing-page",
+      "title": "Fingerprint the landing page",
+      "step_type": "command",
+      "objective": "Capture page-body evidence that the exposed service is the expected default Nginx site.",
+      "instruction": "Fetch the landing page body from the target service.",
+      "explanation": "The page body complements the header evidence. This is where you shift from metadata into visible content and confirm that the page the service returns matches the identity suggested by the scan and the headers.",
+      "what_to_observe": [
+        "The default Nginx welcome text.",
+        "HTML content confirming a real landing page is being returned.",
+        "How the body evidence supports or extends what the headers already told you."
+      ],
+      "why_observation_matters": "The body gives you content-level proof. It shows what a real client receives from the service, which is stronger than relying only on the port scan or the server banner.",
+      "learning_takeaway": "This step added content-level proof by showing what the exposed service returned to a real HTTP request, not just how it described itself in headers.",
+      "expected_outcome": "The response body should contain the default Nginx welcome page content.",
+      "command_hint": "curl http://target",
+      "expected_evidence": [
+        "Welcome to nginx!",
+        "<html"
+      ],
+      "hints": [
+        "This step needs the page body, not just the headers.",
+        "Capture enough of the response to identify the landing page clearly in your evidence."
+      ],
+      "allowed_completion_methods": [
+        "command_match",
+        "evidence_match"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Fetch the page body so you can identify the visible landing page content.",
+      "remediation_text": "If the body is empty or unexpected, make sure you are not still using the header-only curl form from the previous step.",
+      "success_criteria": [
+        "The learner captures HTML content that identifies the default Nginx landing page."
+      ]
+    },
+    {
+      "task_id": "open-browser-view",
+      "title": "Open the service in a browser",
+      "step_type": "browser",
+      "objective": "Confirm that the reachable service also loads through the forwarded browser URL.",
+      "instruction": "Open the published browser URL for the target service.",
+      "explanation": "This final step connects your terminal evidence to the user-facing result. The goal is to confirm that the same service you reasoned about through ICMP, a port scan, headers, and page content is also what a learner actually reaches in the browser.",
+      "what_to_observe": [
+        "The page loads successfully in the browser.",
+        "The visible content matches the Nginx welcome page you saw from curl.",
+        "The forwarded browser URL is reaching the same service you mapped from the terminal."
+      ],
+      "why_observation_matters": "This closes the loop between terminal-side evidence and the visible user experience, which is what makes the recon narrative feel complete instead of fragmented.",
+      "learning_takeaway": "This browser confirmation tied your recon evidence to the visible user experience, showing that the same service you mapped in the terminal was genuinely reachable in a browser.",
+      "expected_outcome": "The browser should load the Nginx welcome page successfully.",
+      "command_hint": "http://localhost:{target_port}",
+      "expected_evidence": [
+        "Welcome to nginx!"
+      ],
+      "hints": [
+        "Use the browser URL returned by the launcher instead of guessing the host port.",
+        "If the page fails to load, confirm the target container is still running and the forwarded port remains published."
+      ],
+      "allowed_completion_methods": [
+        "manual_confirmation"
+      ],
+      "completion_state": "pending",
+      "hint_text": "Use the browser URL returned by the launcher.",
+      "remediation_text": "If the browser does not load, confirm the launcher returned a valid host port and that the Nginx container is still running.",
+      "success_criteria": [
+        "The learner manually confirms that the Nginx welcome page is reachable in a browser."
+      ],
+      "manual_confirmation_label": "Mark Browser Step Complete"
+    }
+  ]
+}

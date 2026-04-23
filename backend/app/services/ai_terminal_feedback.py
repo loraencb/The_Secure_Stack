@@ -1,15 +1,42 @@
 import json
+import logging
 import re
 import shlex
 
 import requests
 
 from app.config import settings
+from app.services import openai_tutor
 from app.services.task_evaluator import command_matches_hint, evaluate_task_attempt
+
+logger = logging.getLogger("securestack.ai_tutor")
 
 LOW_SIGNAL_PREFIXES = ("ping", "pwd", "ls")
 HELP_COMMAND_PREFIXES = ("help", "hint", "stuck", "what next", "why", "how", "?")
 HELP_COMMAND_MARKERS = ("--help", " -h", " man ", " explain ")
+OPENAI_DEEP_TUTOR_INTENTS = {"explain", "stuck"}
+OPENAI_DEEP_MESSAGE_MARKERS = (
+    "why",
+    "how does",
+    "how do",
+    "explain",
+    "what does",
+    "what is happening",
+    "confused",
+    "lost",
+    "stuck",
+    "concept",
+    "debrief",
+    "reflection",
+    "summarize what",
+)
+OPENAI_TUTOR_FIELDS = (
+    "explanation",
+    "security_relevance",
+    "learning_reinforcement",
+    "next_step",
+    "warning",
+)
 PHASE_BY_STEP_TYPE = {
     "command": "reconnaissance",
     "browser": "general-navigation",
@@ -35,6 +62,11 @@ ASK_TUTOR_INTENTS = {
         "min_hint_level": 1,
         "teaching_style": "next_move",
     },
+    "idle_nudge": {
+        "label": "Tutor check-in",
+        "min_hint_level": 1,
+        "teaching_style": "idle_checkin",
+    },
 }
 HINT_LABELS = {
     0: "Observation",
@@ -49,6 +81,14 @@ TUTOR_MODE_LABELS = {
     "near_complete_guidance": "Near-complete guidance",
     "redirect": "Redirect",
     "success_explanation": "Learning reinforcement",
+}
+INTERVENTION_LABELS = {
+    "success_reinforcement": "Success reinforcement",
+    "progress_briefing": "Progress check-in",
+    "off_track_redirect": "Off-track redirect",
+    "browser_handoff_guidance": "Browser handoff",
+    "stuck_intervention": "Stuck intervention",
+    "idle_nudge": "Idle nudge",
 }
 
 
@@ -100,7 +140,9 @@ def _is_help_request_command(command: str) -> bool:
     return False
 
 
-def _format_recent_commands(context: dict | None) -> str:
+def _format_recent_commands(
+    context: dict | None, limit: int = 3, output_limit: int = 220
+) -> str:
     if not context:
         return "No recent command history available."
 
@@ -109,11 +151,10 @@ def _format_recent_commands(context: dict | None) -> str:
         return "No recent command history available."
 
     lines = []
-    for index, item in enumerate(recent_commands[-5:], start=1):
-        command = _truncate(item.get("command", ""), 180)
-        output = _truncate(item.get("output", ""), 320)
+    for index, item in enumerate(recent_commands[-limit:], start=1):
+        command = _truncate(item.get("command", ""), 120)
+        output = _truncate(item.get("output", ""), output_limit)
         assessment = item.get("assessment")
-        hint_level = item.get("hint_level")
         notes = []
         if assessment:
             notes.append(f"assessment={assessment}")
@@ -121,8 +162,6 @@ def _format_recent_commands(context: dict | None) -> str:
             notes.append("off_track")
         if item.get("help_request_detected"):
             notes.append("help_request")
-        if hint_level:
-            notes.append(f"hint_level={hint_level}")
 
         lines.append(f"{index}. Command: {command or '[missing]'}")
         if notes:
@@ -133,95 +172,178 @@ def _format_recent_commands(context: dict | None) -> str:
     return "\n".join(lines)
 
 
-def _normalize_tutor_intent(intent: str | None) -> dict:
+def _format_recent_tutor_messages(
+    context: dict | None, limit: int = 4, content_limit: int = 160
+) -> str:
+    if not context:
+        return "No recent tutor conversation available."
+
+    recent_messages = context.get("recent_tutor_messages") or []
+    if not recent_messages:
+        return "No recent tutor conversation available."
+
+    lines = []
+    for item in recent_messages[-limit:]:
+        role = "Tutor" if item.get("role") == "tutor" else "Student"
+        content = _truncate(item.get("content", ""), content_limit)
+        if content:
+            lines.append(f"- {role}: {content}")
+
+    return "\n".join(lines) if lines else "No recent tutor conversation available."
+
+
+def _format_observation_focus(
+    context: dict | None, limit: int = 3, item_limit: int = 120
+) -> str:
+    if not context:
+        return "No authored observation focus available."
+
+    observations = context.get("step_what_to_observe") or []
+    if not observations:
+        return "No authored observation focus available."
+
+    cleaned = []
+    for item in observations[:limit]:
+        if isinstance(item, str) and item.strip():
+            cleaned.append(_truncate(item.strip(), item_limit))
+
+    return "; ".join(cleaned) if cleaned else "No authored observation focus available."
+
+
+def _build_observation_coaching(context: dict | None) -> str:
+    observation_focus = _format_observation_focus(context, limit=2, item_limit=90)
+    if observation_focus == "No authored observation focus available.":
+        return ""
+
+    observation_significance = (context or {}).get("step_why_observation_matters") or ""
+    if observation_significance:
+        return (
+            f"Watch for {observation_focus.lower()}. "
+            f"That matters because {observation_significance.lower()}."
+        )
+
+    return f"Watch for {observation_focus.lower()}."
+
+
+def _infer_tutor_intent_from_message(message: str | None) -> str:
+    normalized = (message or "").strip().lower()
+    if not normalized:
+        return "hint"
+
+    if any(
+        marker in normalized
+        for marker in ("stuck", "confused", "lost", "not sure", "don't know")
+    ):
+        return "stuck"
+
+    if any(
+        marker in normalized
+        for marker in (
+            "what next",
+            "what should i do next",
+            "next step",
+            "where do i go next",
+            "what now",
+        )
+    ):
+        return "what_next"
+
+    if any(
+        marker in normalized
+        for marker in ("explain", "why", "what does", "what is happening", "how does")
+    ):
+        return "explain"
+
+    return "hint"
+
+
+def _normalize_tutor_intent(
+    intent: str | None, learner_message: str | None = None
+) -> dict:
     normalized = (intent or "").strip().lower().replace("-", "_")
+    if not normalized:
+        normalized = _infer_tutor_intent_from_message(learner_message)
+
     if normalized in ASK_TUTOR_INTENTS:
         return {"key": normalized, **ASK_TUTOR_INTENTS[normalized]}
 
     return {"key": "hint", **ASK_TUTOR_INTENTS["hint"]}
 
 
-def _build_context_block(context: dict | None, tutor_state: dict | None = None) -> str:
+def _build_context_block(
+    context: dict | None, tutor_state: dict | None = None, mode: str = "fast"
+) -> str:
     if not context:
         return "No structured lab context was available for this command."
 
     lab_name = context.get("lab_name") or "Unknown lab"
-    topology_summary = context.get("topology_summary") or "No topology summary available."
-    objectives = context.get("lab_objectives") or []
     step_number = context.get("step_number")
     step_title = context.get("step_title") or "No active step"
-    step_instruction = context.get("step_instruction") or "No active instruction available."
-    step_explanation = context.get("step_explanation") or "No step explanation available."
-    step_objective = context.get("step_objective") or "No step objective available."
-    step_outcome = context.get("step_expected_outcome") or "No expected outcome recorded."
-    step_hint = context.get("step_hint") or "No hint available."
+    step_instruction = context.get("step_instruction") or ""
+    step_explanation = context.get("step_explanation") or ""
+    step_objective = context.get("step_objective") or step_instruction or ""
+    step_outcome = context.get("step_expected_outcome") or _format_expected_outcome(
+        context
+    )
+    step_hint = context.get("step_hint") or ""
     step_status = context.get("step_status") or "pending"
-    step_expected_evidence = context.get("step_expected_evidence") or []
-    step_success_criteria = context.get("step_success_criteria") or []
-    step_remediation = context.get("step_remediation") or "No remediation guidance available."
-
-    objective_lines = "\n".join(f"- {objective}" for objective in objectives[:3]) or "- None recorded"
-    evidence_lines = (
-        "\n".join(f"- {evidence}" for evidence in step_expected_evidence[:4])
-        or "- None recorded"
-    )
-    success_lines = (
-        "\n".join(f"- {criterion}" for criterion in step_success_criteria[:3])
-        or "- None recorded"
-    )
-    tutor_state_lines = "\n".join(
-        [
-            f"- Help requests so far: {context.get('step_help_requests', 0)}",
-            f"- Off-track redirects so far: {context.get('step_off_track_count', 0)}",
-            f"- Consecutive struggle signals: {context.get('step_consecutive_struggle_count', 0)}",
-            (
-                f"- Current adaptive hint level: {tutor_state.get('hint_level', 0)}"
-                if tutor_state
-                else "- Current adaptive hint level: 0"
-            ),
-            (
-                f"- Current ask intent: {tutor_state.get('ask_label', 'None')}"
-                if tutor_state and tutor_state.get("ask_label")
-                else "- Current ask intent: None"
-            ),
-        ]
+    observation_focus = _format_observation_focus(context, limit=3, item_limit=100)
+    observation_significance = (context.get("step_why_observation_matters") or "").strip()
+    hint_level = tutor_state.get("hint_level", 0) if tutor_state else 0
+    ask_label = (
+        tutor_state.get("ask_label", "None")
+        if tutor_state and tutor_state.get("ask_label")
+        else "None"
     )
 
-    return f"""
-Lab:
-{lab_name}
+    lines = [
+        f"Lab: {lab_name}",
+        f"Step: {step_number or 'Not set'} - {step_title}",
+        f"Objective: {step_objective or 'No step objective available.'}",
+        f"Expected outcome: {step_outcome or 'No expected outcome recorded.'}",
+        f"Status: {step_status}",
+        (
+            f"Adaptive state: hint_level={hint_level}, help_requests={context.get('step_help_requests', 0)}, "
+            f"off_track={context.get('step_off_track_count', 0)}, struggle={context.get('step_consecutive_struggle_count', 0)}, ask={ask_label}"
+        ),
+    ]
 
-Lab objectives:
-{objective_lines}
+    if step_hint:
+        lines.append(f"Hint: {step_hint}")
+    if observation_focus != "No authored observation focus available.":
+        lines.append(f"What to observe: {observation_focus}")
 
-Topology summary:
-{topology_summary}
+    if mode == "deep":
+        pre_lab_context = (context.get("lab_pre_lab_context") or "").strip()
+        environment_overview = (context.get("lab_environment_overview") or "").strip()
+        topology_summary = context.get("topology_summary") or ""
+        if pre_lab_context:
+            lines.append(f"Pre-lab context: {_truncate(pre_lab_context, 220)}")
+        if environment_overview:
+            lines.append(f"Environment overview: {_truncate(environment_overview, 180)}")
+        if topology_summary:
+            lines.append(f"Topology: {_truncate(topology_summary, 180)}")
+        if step_instruction and step_instruction != step_objective:
+            lines.append(f"Instruction: {step_instruction}")
+        if step_explanation:
+            lines.append(f"Explanation: {_truncate(step_explanation, 220)}")
+        if observation_significance:
+            lines.append(
+                f"Why the observation matters: {_truncate(observation_significance, 180)}"
+            )
+        lines.append(
+            f"Recent commands:\n{_format_recent_commands(context, limit=3, output_limit=180)}"
+        )
+        lines.append(
+            "Recent tutor conversation:\n"
+            f"{_format_recent_tutor_messages(context, limit=4, content_limit=140)}"
+        )
+    else:
+        lines.append(
+            f"Recent commands:\n{_format_recent_commands(context, limit=2, output_limit=120)}"
+        )
 
-Current guided step:
-- Step number: {step_number or "Not set"}
-- Title: {step_title}
-- Objective: {step_objective}
-- Instruction: {step_instruction}
-- Explanation: {step_explanation}
-- Expected outcome: {step_outcome}
-- Hint: {step_hint}
-- Current workflow status: {step_status}
-
-Expected evidence:
-{evidence_lines}
-
-Success criteria:
-{success_lines}
-
-Remediation guidance:
-{step_remediation}
-
-Adaptive tutor state:
-{tutor_state_lines}
-
-Recent command history:
-{_format_recent_commands(context)}
-""".strip()
+    return "\n".join(lines)
 
 
 def build_terminal_prompt(
@@ -229,55 +351,42 @@ def build_terminal_prompt(
     output: str,
     context: dict | None = None,
     tutor_state: dict | None = None,
+    mode: str = "fast",
 ) -> str:
+    concise_guardrail = (
+        "Keep each field short and practical. Prefer one or two sentences."
+        if mode == "fast"
+        else "You may go a little deeper, but stay concise and instructional."
+    )
+    output_limit = 1400 if mode == "fast" else 2400
+
     return f"""
 You are Secure Stack's AI cybersecurity lab tutor.
 
 Analyze the learner's latest lab command using the current lab guide context.
 
 Structured lab context:
-{_build_context_block(context, tutor_state)}
+{_build_context_block(context, tutor_state, mode=mode)}
 
 Latest command:
 {_truncate(command, 240)}
 
 Latest output:
-{_truncate(output, 3200)}
+{_truncate(output, output_limit)}
 
-Adaptive teaching rules:
-1. If the learner is asking for help or appears stuck, escalate guidance progressively:
-   - hint level 1: subtle conceptual hint
-   - hint level 2: stronger hint with tool or evidence direction
-   - hint level 3: near-complete guidance
-2. Do not reveal the exact command at level 1 unless the step is already complete.
-3. If the learner is off-track, gently redirect them to the current step objective.
-4. When the learner succeeds, explain why the result matters for the lab objective before moving on.
-5. Prefer guided questions, evidence targets, and reasoning over answer-dumping.
+Response style:
+- {concise_guardrail}
+- If the learner is off-track, redirect them to the current step objective.
+- If the learner succeeds, explain why the result matters before moving on.
+- Do not reveal the exact command too early unless the hint level allows it.
 
 Requirements:
-1. Classify the phase as one of:
-   - reconnaissance
-   - enumeration
-   - exploitation
-   - post-exploitation
-   - general-navigation
-2. Assess the command as:
-   - useful
-   - neutral
-   - risky
-   - incorrect
-3. Explain what the output means in the context of the current lab step.
-4. Explain the security relevance and why this matters for the learner.
-5. Suggest the next best step using the current adaptive hint level.
-6. Only create a finding when the output contains strong, report-worthy evidence.
-
-Tutor guardrails:
-- Be instructional and concept-aware, not just evaluative.
-- Help debug mistakes and explain why a step matters.
-- Avoid handing out the full answer immediately unless the hint level allows it or the output already proves the concept.
-- Do not create findings for ping, pwd, ls, or other low-signal navigation commands.
-- Prefer false negatives over false positives for findings.
-- If the output is weak or unclear, guide the learner back to the current objective.
+1. Classify the phase.
+2. Assess the command.
+3. Explain what the output means for the active step.
+4. State why it matters.
+5. Give the next best step using the current hint level.
+6. Only create a finding for strong, report-worthy evidence.
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -293,6 +402,59 @@ Return ONLY valid JSON in this exact format:
   "finding": null
 }}
 """.strip()
+
+
+def _get_response_mode(tutor_state: dict, response: dict | None = None) -> str:
+    if response and response.get("response_mode") in {"fast", "deep"}:
+        return response["response_mode"]
+
+    if tutor_state.get("ask_intent") in {"explain", "stuck"}:
+        return "deep"
+
+    return "fast"
+
+
+def _apply_response_length_limits(response: dict, response_mode: str) -> dict:
+    limited = dict(response)
+    limits = (
+        {
+            "explanation": 420,
+            "security_relevance": 320,
+            "learning_reinforcement": 360,
+            "next_step": 260,
+            "warning": 220,
+        }
+        if response_mode == "deep"
+        else {
+            "explanation": 220,
+            "security_relevance": 180,
+            "learning_reinforcement": 200,
+            "next_step": 180,
+            "warning": 160,
+        }
+    )
+
+    for field, limit in limits.items():
+        value = limited.get(field)
+        if isinstance(value, str):
+            limited[field] = _truncate(value, limit)
+
+    finding = limited.get("finding")
+    if isinstance(finding, dict):
+        limited["finding"] = {
+            **finding,
+            "title": _truncate(finding.get("title", ""), 120),
+            "description": _truncate(
+                finding.get("description", ""),
+                260 if response_mode == "deep" else 180,
+            ),
+            "evidence": _truncate(
+                finding.get("evidence", ""),
+                420 if response_mode == "deep" else 260,
+            ),
+        }
+
+    return limited
 
 
 def _extract_json(text: str) -> str:
@@ -615,7 +777,11 @@ def _derive_tutor_state(command: str, output: str, context: dict | None = None) 
     next_step_action = context.get("next_step_action") or ""
     ask_intent_meta = _normalize_tutor_intent(context.get("ask_intent"))
     ask_intent = ask_intent_meta["key"] if context.get("ask_intent") else ""
-    explicit_help_request = bool(ask_intent) or _is_help_request_command(command)
+    idle_observer_request = ask_intent == "idle_nudge"
+    explicit_help_request = (
+        (bool(ask_intent) and not idle_observer_request)
+        or _is_help_request_command(command)
+    )
     repeated_primary_command_count = _count_recent_primary_command_matches(command, context)
     repeated_same_action = repeated_primary_command_count >= 2
     prior_help_requests = _safe_int(context.get("step_help_requests"))
@@ -676,6 +842,18 @@ def _derive_tutor_state(command: str, output: str, context: dict | None = None) 
                 1,
                 min(3, max(help_requests, off_track_count, consecutive_struggle_count)),
             )
+        elif idle_observer_request:
+            if attempt_needs_evidence:
+                hint_level = 1
+
+            if prior_help_requests >= 1 or prior_off_track_count >= 1:
+                hint_level = max(hint_level, 2)
+
+            if prior_help_requests >= 2 or prior_off_track_count >= 2:
+                hint_level = 3
+
+            if hint_level == 0:
+                hint_level = 1
         elif attempt_needs_evidence and repeated_same_action:
             hint_level = 2
         elif attempt_needs_evidence and consecutive_struggle_count >= 1:
@@ -684,7 +862,7 @@ def _derive_tutor_state(command: str, output: str, context: dict | None = None) 
         if help_requests >= 3 or off_track_count >= 3 or consecutive_struggle_count >= 3:
             hint_level = 3
 
-        if ask_intent:
+        if ask_intent and not idle_observer_request:
             hint_level = max(hint_level, ask_intent_meta["min_hint_level"])
 
     stuck_detected = bool(
@@ -746,7 +924,14 @@ def _build_step_importance(context: dict | None) -> str:
 
     step_explanation = (context.get("step_explanation") or "").strip()
     step_objective = (context.get("step_objective") or "").strip()
+    observation_significance = (context.get("step_why_observation_matters") or "").strip()
     expected_outcome = _format_expected_outcome(context)
+
+    if observation_significance and step_explanation:
+        return f"{step_explanation} Pay attention to the key signal here because {observation_significance.lower()}."
+
+    if observation_significance:
+        return observation_significance
 
     if step_explanation and step_objective:
         return f"{step_explanation} This step matters because the lab objective is to {step_objective.lower()}."
@@ -763,6 +948,134 @@ def _build_step_importance(context: dict | None) -> str:
     return step_objective or "Stay aligned with the current lab objective."
 
 
+def _with_companion_lead(text: str, lead: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return lead.rstrip(" :,.")
+
+    lead_root = lead.strip().rstrip(":,.").lower()
+    if cleaned.lower().startswith(lead_root):
+        return cleaned
+
+    if len(cleaned) > 1 and cleaned[0].isupper() and not cleaned[1].isupper():
+        cleaned = cleaned[0].lower() + cleaned[1:]
+
+    return f"{lead}{cleaned}"
+
+
+def _build_progress_briefing_explanation(context: dict | None) -> str:
+    step_title = (context or {}).get("step_title") or "this step"
+    expected_outcome = _format_expected_outcome(context)
+    observation_focus = _format_observation_focus(context, limit=2, item_limit=90)
+
+    if expected_outcome and observation_focus != "No authored observation focus available.":
+        return (
+            f"Good direction on {step_title}. You are using the right move, "
+            f"but you still need evidence that {expected_outcome.lower()}. "
+            f"Pay attention to {observation_focus.lower()}."
+        )
+
+    if expected_outcome:
+        return (
+            f"Good direction on {step_title}. You are using the right move, "
+            f"but you still need evidence that {expected_outcome.lower()}."
+        )
+
+    return (
+        f"Good direction on {step_title}. You are working on the right move, "
+        "but you still need a clearer piece of evidence before this step is closed."
+    )
+
+
+def _build_success_brief(response: dict, context: dict | None) -> str:
+    existing = (response.get("explanation") or "").strip()
+    if existing:
+        return _with_companion_lead(existing, "Good, ")
+
+    step_title = (context or {}).get("step_title") or "that step"
+    return f"Good, that closes {step_title.lower()}."
+
+
+def _build_idle_brief(response: dict) -> str:
+    existing = (response.get("explanation") or "").strip()
+    if existing:
+        return _with_companion_lead(existing, "Quick check-in: ")
+
+    return "Quick check-in: you have been quiet on the current step for a bit."
+
+
+def _build_redirect_brief(response: dict) -> str:
+    existing = (response.get("explanation") or "").strip()
+    if existing:
+        return _with_companion_lead(existing, "Let's reset: ")
+
+    return "Let's reset: that move is not lining up with the current step."
+
+
+def _build_stuck_brief(response: dict) -> str:
+    existing = (response.get("explanation") or "").strip()
+    if existing:
+        return _with_companion_lead(existing, "Let's tighten it up: ")
+
+    return "Let's tighten it up: you are close, but the step still needs clearer evidence."
+
+
+def _build_idle_nudge_response(context: dict | None, tutor_state: dict) -> dict:
+    step_title = (context or {}).get("step_title") or "the current step"
+    step_objective = (context or {}).get("step_objective") or (context or {}).get(
+        "step_instruction"
+    )
+    step_explanation = (context or {}).get("step_explanation") or ""
+    step_type = (context or {}).get("step_type") or ""
+    browser_url = (context or {}).get("browser_url") or ""
+    expected_outcome = _format_expected_outcome(context)
+    observation_coaching = _build_observation_coaching(context)
+
+    response = _default_response(context=context)
+    response["response_origin"] = "proactive_tutor"
+    response["ask_intent"] = "idle_nudge"
+    response["ask_label"] = "Tutor check-in"
+    response["response_mode"] = "fast"
+
+    if step_type == "browser":
+        response["explanation"] = (
+            f"You have been sitting on {step_title} for a bit. This one is better handled in the browser, not the shell."
+        )
+        response["security_relevance"] = _build_step_importance(context)
+        response["learning_reinforcement"] = (
+            step_explanation
+            or "This handoff matters because the lab now wants application behavior, not another terminal command."
+        )
+        response["next_step"] = (
+            f"Open {browser_url} and confirm the application behavior this step expects."
+            if browser_url
+            else "Open the forwarded browser URL and confirm the application behavior this step expects."
+        )
+        return response
+
+    if tutor_state.get("stuck_detected") or tutor_state.get("hint_level", 0) >= 2:
+        response["explanation"] = (
+            f"You have been quiet on {step_title} for a bit. I can narrow the next move without dumping the whole answer."
+        )
+    else:
+        response["explanation"] = (
+            f"You have been quiet on {step_title} for a bit. Stay with the evidence this step still needs."
+        )
+
+    response["security_relevance"] = _build_step_importance(context)
+    response["learning_reinforcement"] = (
+        f"The goal is to gather evidence that shows {expected_outcome.lower()}."
+        if expected_outcome
+        else step_explanation or step_objective or ""
+    )
+    if observation_coaching:
+        response["learning_reinforcement"] = (
+            f"{response['learning_reinforcement']} {observation_coaching}".strip()
+        )
+    response["next_step"] = _build_adaptive_next_step(context, tutor_state)
+    return response
+
+
 def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> dict:
     ask_intent = tutor_state.get("ask_intent")
     ask_label = tutor_state.get("ask_label") or "Give me a hint"
@@ -773,15 +1086,19 @@ def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> di
     step_expected_outcome = _format_expected_outcome(context)
     step_hint = (context or {}).get("step_hint") or ""
     step_explanation = (context or {}).get("step_explanation") or ""
+    observation_coaching = _build_observation_coaching(context)
 
     response = _default_response(context=context)
     response["response_origin"] = "ask_tutor"
     response["ask_intent"] = ask_intent
     response["ask_label"] = ask_label
 
+    if ask_intent == "idle_nudge":
+        return _build_idle_nudge_response(context, tutor_state)
+
     if ask_intent == "explain":
         response["explanation"] = (
-            f"This step, {step_title}, is asking you to prove a specific concept before moving on."
+            f"{step_title} depends on proving the current condition first, then moving deeper."
         )
         response["security_relevance"] = _build_step_importance(context)
         response["learning_reinforcement"] = (
@@ -790,6 +1107,10 @@ def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> di
             if step_expected_outcome
             else step_explanation or step_objective or ""
         )
+        if observation_coaching:
+            response["learning_reinforcement"] = (
+                f"{response['learning_reinforcement']} {observation_coaching}".strip()
+            )
         response["next_step"] = (
             step_hint
             or step_objective
@@ -799,12 +1120,16 @@ def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> di
 
     if ask_intent == "stuck":
         response["explanation"] = (
-            "You signaled that you are stuck, so the tutor is moving up the hint ladder without jumping straight to the full answer."
+            "You are stuck, so I am moving up the hint ladder without jumping straight to the full answer."
         )
         response["security_relevance"] = _build_step_importance(context)
         response["learning_reinforcement"] = (
             "The goal is to unblock the current step while keeping the reasoning visible enough for you to learn from it."
         )
+        if observation_coaching:
+            response["learning_reinforcement"] = (
+                f"{response['learning_reinforcement']} {observation_coaching}".strip()
+            )
         response["next_step"] = (
             step_hint
             or step_objective
@@ -814,7 +1139,7 @@ def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> di
 
     if ask_intent == "what_next":
         response["explanation"] = (
-            "You asked for the next move, so the tutor is pointing you toward the current step's evidence target first."
+            "Stay with the current step until you have the evidence it expects."
         )
         response["security_relevance"] = _build_step_importance(context)
         response["learning_reinforcement"] = (
@@ -822,6 +1147,10 @@ def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> di
             if step_expected_outcome
             else step_explanation or step_objective or ""
         )
+        if observation_coaching:
+            response["learning_reinforcement"] = (
+                f"{response['learning_reinforcement']} {observation_coaching}".strip()
+            )
         response["next_step"] = (
             step_hint
             or step_objective
@@ -830,7 +1159,7 @@ def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> di
         return response
 
     response["explanation"] = (
-        "You asked for a hint, so the tutor is narrowing the problem without revealing the full answer yet."
+        "Narrow the problem without jumping straight to the final answer."
     )
     response["security_relevance"] = _build_step_importance(context)
     response["learning_reinforcement"] = (
@@ -838,12 +1167,199 @@ def _build_tutor_request_response(context: dict | None, tutor_state: dict) -> di
         if step_expected_outcome
         else step_explanation or step_objective or ""
     )
+    if observation_coaching:
+        response["learning_reinforcement"] = (
+            f"{response['learning_reinforcement']} {observation_coaching}".strip()
+        )
     response["next_step"] = (
         step_hint
         or step_objective
         or "Focus on the evidence the active step expects."
     )
     return response
+
+
+def _build_tutor_chat_response(
+    learner_message: str, context: dict | None, tutor_state: dict
+) -> dict:
+    ask_intent = tutor_state.get("ask_intent")
+    ask_label = tutor_state.get("ask_label") or "Tutor help"
+    step_title = (context or {}).get("step_title") or "the current step"
+    step_objective = (context or {}).get("step_objective") or (context or {}).get(
+        "step_instruction"
+    )
+    step_explanation = (context or {}).get("step_explanation") or ""
+    step_hint = (context or {}).get("step_hint") or ""
+    expected_outcome = _format_expected_outcome(context)
+    learner_question = (learner_message or "").strip()
+    browser_url = (context or {}).get("browser_url") or ""
+    step_type = (context or {}).get("step_type") or ""
+    observation_coaching = _build_observation_coaching(context)
+
+    response = _default_response(context=context)
+    response["response_origin"] = "tutor_chat"
+    response["ask_intent"] = ask_intent
+    response["ask_label"] = ask_label
+    response["learner_message"] = learner_question
+
+    if step_type == "browser":
+        response["explanation"] = (
+            f"This step has moved out of the shell. Use the browser for {step_title} and verify the behavior there."
+        )
+        response["security_relevance"] = _build_step_importance(context)
+        response["learning_reinforcement"] = (
+            step_explanation
+            or "Browser validation matters because it confirms the application-side behavior the lab wants you to observe."
+        )
+        response["next_step"] = (
+            f"Open {browser_url} and confirm the expected application behavior."
+            if browser_url
+            else "Open the forwarded browser URL and confirm the expected application behavior."
+        )
+        return response
+
+    if ask_intent == "explain":
+        response["explanation"] = (
+            f"For {step_title}, prove the current condition before you move on to the deeper action."
+        )
+        response["security_relevance"] = _build_step_importance(context)
+        response["learning_reinforcement"] = (
+            f"When this step is complete, you should be able to show that {expected_outcome.lower()}."
+            if expected_outcome
+            else step_explanation or step_objective or ""
+        )
+        if observation_coaching:
+            response["learning_reinforcement"] = (
+                f"{response['learning_reinforcement']} {observation_coaching}".strip()
+            )
+        response["next_step"] = (
+            step_hint
+            or step_objective
+            or "Focus on the concrete evidence the current step expects."
+        )
+        return response
+
+    if ask_intent == "what_next":
+        response["explanation"] = (
+            "The best next move is still the one that proves the current step before the lab advances."
+        )
+        response["security_relevance"] = _build_step_importance(context)
+        response["learning_reinforcement"] = (
+            f"The next action should produce evidence that {expected_outcome.lower()}."
+            if expected_outcome
+            else step_explanation or step_objective or ""
+        )
+        if observation_coaching:
+            response["learning_reinforcement"] = (
+                f"{response['learning_reinforcement']} {observation_coaching}".strip()
+            )
+        response["next_step"] = (
+            step_hint
+            or step_objective
+            or "Take the next evidence-gathering action for the active step."
+        )
+        return response
+
+    if ask_intent == "stuck":
+        response["explanation"] = (
+            f"Stay on {step_title} and focus on one piece of evidence at a time."
+        )
+        response["security_relevance"] = _build_step_importance(context)
+        response["learning_reinforcement"] = (
+            "The tutor is escalating support because repeated struggle usually means the step needs a clearer evidence target, not just another random command."
+        )
+        if observation_coaching:
+            response["learning_reinforcement"] = (
+                f"{response['learning_reinforcement']} {observation_coaching}".strip()
+            )
+        response["next_step"] = (
+            step_hint
+            or step_objective
+            or "Refocus on the evidence this step expects and the tool most likely to produce it."
+        )
+        return response
+
+    response["explanation"] = (
+        "I will keep this light first so you can still reason through the step yourself."
+    )
+    response["security_relevance"] = _build_step_importance(context)
+    response["learning_reinforcement"] = (
+        f"Keep aiming for evidence that shows {expected_outcome.lower()}."
+        if expected_outcome
+        else step_explanation or step_objective or ""
+    )
+    if observation_coaching:
+        response["learning_reinforcement"] = (
+            f"{response['learning_reinforcement']} {observation_coaching}".strip()
+        )
+    response["next_step"] = (
+        step_hint
+        or step_objective
+        or "Focus on the evidence the active step expects."
+    )
+    return response
+
+
+def _is_deep_tutor_moment(
+    intent: str | None,
+    context: dict | None,
+    learner_message: str,
+) -> bool:
+    normalized_intent = (intent or "").strip().lower()
+    if normalized_intent in OPENAI_DEEP_TUTOR_INTENTS:
+        return True
+
+    message = (learner_message or "").strip().lower()
+    if not message:
+        return False
+
+    lab_complete = bool(
+        (context or {}).get("step_status") == "completed"
+        and not (context or {}).get("step_task_id")
+    )
+
+    if lab_complete and any(
+        marker in message for marker in ("debrief", "reflect", "summary", "learned")
+    ):
+        return True
+
+    if len(message) >= 90:
+        return True
+
+    return any(marker in message for marker in OPENAI_DEEP_MESSAGE_MARKERS)
+
+
+def _should_use_openai_tutor(
+    intent: str | None,
+    context: dict | None,
+    learner_message: str,
+) -> bool:
+    if not settings.openai_tutor_enabled:
+        return False
+
+    return _is_deep_tutor_moment(intent, context, learner_message)
+
+
+def _merge_openai_tutor_response(
+    local_response: dict,
+    openai_response: dict | None,
+) -> tuple[dict, bool]:
+    if not openai_response:
+        return local_response, False
+
+    merged = dict(local_response)
+    applied = False
+    for field in OPENAI_TUTOR_FIELDS:
+        value = openai_response.get(field)
+        if isinstance(value, str) and value.strip():
+            merged[field] = value.strip()
+            applied = True
+
+    if applied:
+        merged["deep_reasoning_provider"] = "openai"
+        merged["openai_model"] = settings.openai_model
+
+    return merged, applied
 
 
 def _format_expected_outcome(context: dict | None) -> str:
@@ -975,27 +1491,46 @@ def _build_learning_reinforcement(context: dict | None, tutor_state: dict) -> st
     if not context:
         return ""
 
+    step_learning_takeaway = context.get("step_learning_takeaway") or ""
     step_objective = context.get("step_objective") or context.get("step_instruction") or ""
     expected_outcome = _format_expected_outcome(context)
     step_explanation = context.get("step_explanation") or ""
+    observation_focus = _format_observation_focus(context, limit=2, item_limit=90)
+    observation_significance = (context.get("step_why_observation_matters") or "").strip()
 
     if tutor_state["step_completed"]:
+        if step_learning_takeaway:
+            return step_learning_takeaway
+        if observation_focus != "No authored observation focus available." and observation_significance:
+            return (
+                f"Noticing {observation_focus.lower()} mattered because {observation_significance.lower()}."
+            )
         if expected_outcome and step_objective:
             return (
-                f"This result satisfies the current step because it shows {expected_outcome.lower()}. "
-                f"That matters because the lab objective is to {step_objective.lower()}."
+                f"This result shows {expected_outcome.lower()}. "
+                f"It matters to the lab objective because you must {step_objective.lower()}."
             )
         return step_explanation or step_objective
 
     if tutor_state["off_track_detected"]:
         if step_objective:
             return f"Stay centered on the current objective: {step_objective}"
-        return step_explanation
+        return step_learning_takeaway or observation_significance or step_explanation
 
     if expected_outcome:
+        if observation_focus != "No authored observation focus available.":
+            return (
+                f"The evidence you still need for this step is: {expected_outcome}. "
+                f"Focus on {observation_focus.lower()}."
+            )
         return f"The evidence you still need for this step is: {expected_outcome}"
 
-    return step_explanation or step_objective
+    return (
+        step_learning_takeaway
+        or observation_significance
+        or step_explanation
+        or step_objective
+    )
 
 
 def _build_redirect_explanation(command: str, context: dict | None, tutor_state: dict) -> str:
@@ -1031,6 +1566,63 @@ def _build_redirect_warning(context: dict | None, tutor_state: dict) -> str:
     )
 
 
+def _get_intervention_reason(
+    command: str, context: dict | None, tutor_state: dict
+) -> str:
+    if tutor_state["ask_intent"] == "idle_nudge":
+        return "idle_nudge"
+
+    if tutor_state["explicit_help_request"]:
+        return ""
+
+    if (
+        _is_low_signal_command(command)
+        and tutor_state["off_track_reason"] != "browser_step"
+        and not tutor_state["step_completed"]
+    ):
+        return ""
+
+    if tutor_state["step_completed"]:
+        return "success_reinforcement"
+
+    if tutor_state["off_track_detected"]:
+        if tutor_state["off_track_reason"] == "browser_step":
+            return "browser_handoff_guidance"
+        return "off_track_redirect"
+
+    if (
+        tutor_state["attempt_needs_evidence"]
+        and tutor_state["current_step_match"]
+        and not tutor_state["stuck_detected"]
+    ):
+        return "progress_briefing"
+
+    if tutor_state["stuck_detected"] or (
+        tutor_state["attempt_needs_evidence"] and tutor_state["hint_level"] >= 2
+    ):
+        return "stuck_intervention"
+
+    return ""
+
+
+def _build_intervention_key(
+    context: dict | None, tutor_state: dict, intervention_reason: str
+) -> str:
+    if not intervention_reason:
+        return ""
+
+    step_task_id = (context or {}).get("step_task_id") or "no-step"
+    if intervention_reason in {
+        "success_reinforcement",
+        "browser_handoff_guidance",
+        "progress_briefing",
+    }:
+        return f"{intervention_reason}:{step_task_id}"
+
+    hint_bucket = min(max(tutor_state.get("hint_level", 1), 1), 3)
+    return f"{intervention_reason}:{step_task_id}:{hint_bucket}"
+
+
 def _apply_teaching_strategy(
     response: dict,
     command: str,
@@ -1039,6 +1631,15 @@ def _apply_teaching_strategy(
     tutor_state: dict,
 ) -> dict:
     enriched = dict(response)
+    intervention_reason = _get_intervention_reason(command, context, tutor_state)
+    proactive_intervention = bool(intervention_reason)
+    response_origin = response.get("response_origin") or (
+        "ask_tutor" if tutor_state["ask_intent"] else "command_review"
+    )
+    if proactive_intervention and response_origin == "command_review":
+        response_origin = "proactive_tutor"
+    response_mode = _get_response_mode(tutor_state, response)
+
     enriched["hint_level"] = tutor_state["hint_level"]
     enriched["hint_label"] = tutor_state["hint_label"]
     enriched["tutor_mode"] = tutor_state["tutor_mode"]
@@ -1050,9 +1651,19 @@ def _apply_teaching_strategy(
     enriched["step_completed_detected"] = tutor_state["step_completed"]
     enriched["ask_intent"] = tutor_state["ask_intent"]
     enriched["ask_label"] = tutor_state["ask_label"]
-    enriched["response_origin"] = (
-        "ask_tutor" if tutor_state["ask_intent"] else response.get("response_origin", "command_review")
+    enriched["response_origin"] = response_origin
+    enriched["proactive_intervention"] = proactive_intervention
+    enriched["intervention_reason"] = intervention_reason
+    enriched["intervention_label"] = INTERVENTION_LABELS.get(
+        intervention_reason, ""
     )
+    enriched["intervention_key"] = _build_intervention_key(
+        context, tutor_state, intervention_reason
+    )
+    enriched["should_append_to_chat"] = bool(
+        response_origin in {"ask_tutor", "tutor_chat"} or proactive_intervention
+    )
+    enriched["response_mode"] = response_mode
     enriched["learning_reinforcement"] = (
         enriched.get("learning_reinforcement")
         or _build_learning_reinforcement(context, tutor_state)
@@ -1060,8 +1671,9 @@ def _apply_teaching_strategy(
 
     if tutor_state["step_completed"]:
         enriched["assessment"] = "useful"
+        enriched["explanation"] = _build_success_brief(enriched, context)
         enriched["next_step"] = _contextual_follow_up_step(context)
-        return enriched
+        return _apply_response_length_limits(enriched, response_mode)
 
     adaptive_next_step = _build_adaptive_next_step(context, tutor_state)
 
@@ -1079,11 +1691,44 @@ def _apply_teaching_strategy(
             or (context or {}).get("step_objective")
             or enriched["security_relevance"]
         )
+        if ask_intent := tutor_state.get("ask_intent"):
+            if ask_intent == "explain":
+                enriched["explanation"] = _with_companion_lead(
+                    enriched["explanation"],
+                    "Here's the idea: ",
+                )
+            elif ask_intent == "what_next":
+                enriched["explanation"] = _with_companion_lead(
+                    enriched["explanation"],
+                    "Next move: ",
+                )
+            elif ask_intent == "stuck":
+                enriched["explanation"] = _with_companion_lead(
+                    enriched["explanation"],
+                    "Let's narrow it down: ",
+                )
+            else:
+                enriched["explanation"] = _with_companion_lead(
+                    enriched["explanation"],
+                    "Light hint: ",
+                )
         enriched["next_step"] = adaptive_next_step
         enriched["finding_detected"] = False
         enriched["finding_confidence"] = "low"
         enriched["finding"] = None
-        return enriched
+        return _apply_response_length_limits(enriched, response_mode)
+
+    if tutor_state["ask_intent"] == "idle_nudge":
+        enriched["assessment"] = enriched.get("assessment") or "neutral"
+        enriched["phase"] = enriched.get("phase") or PHASE_BY_STEP_TYPE.get(
+            (context or {}).get("step_type"),
+            "general-navigation",
+        )
+        enriched["explanation"] = _build_idle_brief(enriched)
+        enriched["finding_detected"] = False
+        enriched["finding_confidence"] = "low"
+        enriched["finding"] = None
+        return _apply_response_length_limits(enriched, response_mode)
 
     if tutor_state["off_track_detected"]:
         enriched["assessment"] = "incorrect"
@@ -1094,6 +1739,7 @@ def _apply_teaching_strategy(
         enriched["explanation"] = _build_redirect_explanation(
             command, context, tutor_state
         )
+        enriched["explanation"] = _build_redirect_brief(enriched)
         enriched["security_relevance"] = (
             (context or {}).get("step_objective")
             or (context or {}).get("step_explanation")
@@ -1104,20 +1750,17 @@ def _apply_teaching_strategy(
         enriched["finding_detected"] = False
         enriched["finding_confidence"] = "low"
         enriched["finding"] = None
-        return enriched
+        return _apply_response_length_limits(enriched, response_mode)
 
     if tutor_state["attempt_needs_evidence"] or tutor_state["hint_level"] > 0:
         enriched["next_step"] = adaptive_next_step
         if tutor_state["attempt_needs_evidence"]:
-            expected_outcome = _format_expected_outcome(context)
-            if expected_outcome:
-                enriched["explanation"] = (
-                    "The command is aimed at the right step, but the captured output does not yet prove "
-                    f"{expected_outcome.lower()}."
-                )
-        return enriched
+            enriched["explanation"] = _build_progress_briefing_explanation(context)
+            if intervention_reason == "stuck_intervention":
+                enriched["explanation"] = _build_stuck_brief(enriched)
+        return _apply_response_length_limits(enriched, response_mode)
 
-    return enriched
+    return _apply_response_length_limits(enriched, response_mode)
 
 
 def analyze_terminal_interaction(command: str, output: str, context: dict | None = None) -> dict:
@@ -1151,16 +1794,7 @@ def analyze_terminal_interaction(command: str, output: str, context: dict | None
             tutor_state,
         )
 
-    if _is_unclear_output(output):
-        recon_override = _recon_finding(command, output, context)
-        if recon_override:
-            return _apply_teaching_strategy(
-                recon_override,
-                command,
-                output,
-                context,
-                tutor_state,
-            )
+    if tutor_state["off_track_detected"]:
         return _apply_teaching_strategy(
             _default_response(context=context),
             command,
@@ -1169,7 +1803,41 @@ def analyze_terminal_interaction(command: str, output: str, context: dict | None
             tutor_state,
         )
 
-    prompt = build_terminal_prompt(command, output, context, tutor_state)
+    recon_override = _recon_finding(command, output, context)
+    if recon_override:
+        return _apply_teaching_strategy(
+            recon_override,
+            command,
+            output,
+            context,
+            tutor_state,
+        )
+
+    if tutor_state["step_completed"] or tutor_state["attempt_needs_evidence"]:
+        return _apply_teaching_strategy(
+            _default_response(context=context),
+            command,
+            output,
+            context,
+            tutor_state,
+        )
+
+    if _is_unclear_output(output):
+        return _apply_teaching_strategy(
+            _default_response(context=context),
+            command,
+            output,
+            context,
+            tutor_state,
+        )
+
+    prompt = build_terminal_prompt(
+        command,
+        output,
+        context,
+        tutor_state,
+        mode="fast",
+    )
 
     try:
         response = requests.post(
@@ -1180,7 +1848,7 @@ def analyze_terminal_interaction(command: str, output: str, context: dict | None
                 "stream": False,
                 "options": {"temperature": 0},
             },
-            timeout=settings.ollama_timeout_seconds,
+            timeout=min(settings.ollama_timeout_seconds, 12.0),
         )
         response.raise_for_status()
         raw = response.json().get("response", "{}")
@@ -1220,17 +1888,58 @@ def analyze_terminal_interaction(command: str, output: str, context: dict | None
         )
 
 
-def analyze_tutor_request(intent: str, context: dict | None = None) -> dict:
-    normalized_intent = _normalize_tutor_intent(intent)
+def analyze_tutor_request(
+    intent: str,
+    context: dict | None = None,
+    learner_message: str = "",
+    conversation_history: list[dict] | None = None,
+) -> dict:
+    normalized_intent = _normalize_tutor_intent(intent, learner_message)
     request_context = {
         **(context or {}),
         "ask_intent": normalized_intent["key"],
+        "recent_tutor_messages": conversation_history
+        or (context or {}).get("recent_tutor_messages")
+        or [],
     }
-    tutor_state = _derive_tutor_state("help", "", request_context)
-    response = _build_tutor_request_response(request_context, tutor_state)
+    synthetic_command = learner_message.strip() or (
+        normalized_intent["key"] if normalized_intent["key"] == "idle_nudge" else "help"
+    )
+    tutor_state = _derive_tutor_state(synthetic_command, "", request_context)
+    response = (
+        _build_tutor_chat_response(learner_message, request_context, tutor_state)
+        if learner_message.strip()
+        else _build_tutor_request_response(request_context, tutor_state)
+    )
+
+    if _should_use_openai_tutor(
+        normalized_intent["key"],
+        request_context,
+        learner_message,
+    ):
+        openai_response = openai_tutor.ask_openai_tutor(
+            normalized_intent["key"],
+            request_context,
+            learner_message,
+            tutor_state,
+        )
+        response, used_openai = _merge_openai_tutor_response(response, openai_response)
+        if not used_openai:
+            response = {
+                **response,
+                "deep_reasoning_provider": "local_fallback",
+                "deep_reasoning_fallback": True,
+            }
+            logger.info(
+                "openai_tutor_fallback intent=%s lab_id=%s step_task_id=%s",
+                normalized_intent["key"],
+                request_context.get("lab_id"),
+                request_context.get("step_task_id"),
+            )
+
     return _apply_teaching_strategy(
         response,
-        normalized_intent["label"],
+        learner_message.strip() or normalized_intent["label"],
         "",
         request_context,
         tutor_state,

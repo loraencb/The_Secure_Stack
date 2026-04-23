@@ -9,6 +9,16 @@ export const LAB_CATALOG = [
     category: "Web Security",
     estimatedDurationMinutes: 45,
   },
+  {
+    labId: "http-service-mapping",
+    sessionLabName: "http-service-mapping",
+    name: "HTTP Service Mapping",
+    description:
+      "Guide learners through service enumeration, header analysis, and browser validation against an exposed Nginx target.",
+    difficulty: "Beginner",
+    category: "Service Enumeration",
+    estimatedDurationMinutes: 30,
+  },
 ];
 
 export const DEFAULT_LAB_ID = LAB_CATALOG[0]?.labId ?? "juice-shop-recon";

@@ -13,6 +13,7 @@ from app.routers import (
     labs,
     sessions,
     findings,
+    instructor_review,
     reports,
     ws_terminal,
     task_progress,
@@ -36,6 +37,7 @@ app.include_router(auth.router)
 app.include_router(labs.router)
 app.include_router(sessions.router)
 app.include_router(findings.router)
+app.include_router(instructor_review.router)
 app.include_router(reports.router)
 app.include_router(task_progress.router)
 app.include_router(ws_terminal.router)

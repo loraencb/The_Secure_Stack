@@ -140,9 +140,14 @@ export default function SessionShell({
   const sessionCompleted = Boolean(
     sessionRecord?.status === "completed" || sessionRecord?.end_time
   );
+  const isOverviewSection = currentSection.slug === "overview";
   const recommendedSection = workflow.nextRecommendation?.targetSection
     ? getSessionSection(workflow.nextRecommendation.targetSection)
     : nextSection;
+  const isFocusSection =
+    currentSection.slug === "guide" || currentSection.slug === "workspace";
+  const isWorkspaceSection = currentSection.slug === "workspace";
+  const isMinimalSection = isWorkspaceSection || isOverviewSection;
   const journeyPercent = getSessionJourneyPercent(currentSection.slug);
   const launchButtonClass =
     workflow.nextRecommendation.key === "launch_environment"
@@ -152,6 +157,17 @@ export default function SessionShell({
     workflow.nextRecommendation.key === "generate_report"
       ? "button button--primary"
       : "button button--secondary";
+  const workspaceStatusLabel = sessionCompleted
+    ? "Review mode"
+    : workflow.environmentLaunched
+    ? "Live workspace"
+    : "Ready to launch";
+  const minimalStatusLabel = isWorkspaceSection
+    ? workspaceStatusLabel
+    : sessionCompleted
+    ? "Review mode"
+    : "Session overview";
+  const sessionActionsLabel = isMinimalSection ? "Session" : "Session Actions";
 
   useEffect(() => {
     if (!currentSessionId || invalidSessionId) {
@@ -184,138 +200,185 @@ export default function SessionShell({
 
   return (
     <div className="page-stack">
-      <section className="hero hero--session">
-        <div className="hero__content">
-          <div className="hero__eyebrow">Session Workspace</div>
-          <h1>{activeLabDefinition?.name || activeLabConfig.name}</h1>
-          <p>
-            Work through the live lab, switch between guide and reports without
-            leaving the session, and keep the workflow visible at every step.
-          </p>
-        </div>
+      {!isWorkspaceSection && !isOverviewSection ? (
+        <section className="hero hero--session">
+          <div className="hero__content">
+            <div className="hero__eyebrow">Session Workspace</div>
+            <h1>{activeLabDefinition?.name || activeLabConfig.name}</h1>
+            <p>
+              Work through the live lab, switch between guide and reports without
+              leaving the session, and keep the next lab move clear at every step.
+            </p>
+          </div>
 
-        <div className="hero__panel">
-          <div className="hero__metric">
-            <span>Session</span>
-            <strong>{currentSessionId ? `#${currentSessionId}` : "Not started"}</strong>
+          <div className="hero__panel">
+            <div className="hero__metric">
+              <span>Session</span>
+              <strong>{currentSessionId ? `#${currentSessionId}` : "Not started"}</strong>
+            </div>
+            <div className="hero__metric">
+              <span>Progress</span>
+              <strong>{summary.progressPercent}% complete</strong>
+            </div>
+            <div className="hero__metric">
+              <span>Status</span>
+              <strong>{sessionLoadError ? "Needs attention" : workflow.status.label}</strong>
+            </div>
           </div>
-          <div className="hero__metric">
-            <span>Progress</span>
-            <strong>{summary.progressPercent}% complete</strong>
-          </div>
-          <div className="hero__metric">
-            <span>Status</span>
-            <strong>{sessionLoadError ? "Needs attention" : workflow.status.label}</strong>
-          </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
-      <section className="surface-card session-shell">
+      <section
+        className={`surface-card session-shell ${
+          isWorkspaceSection ? "session-shell--workspace" : ""
+        }`}
+      >
         <div className="session-shell__topbar">
-          <div className="session-shell__status">
-            <span className={badgeClass(sessionLoadError ? "danger" : "success")}>
-              {sessionLoadError ? "Session error" : `Session #${currentSessionId || "?"}`}
-            </span>
-            {sessionCompleted ? (
-              <span className={badgeClass("muted")}>Session completed</span>
-            ) : null}
-            <span
-              className={badgeClass(
-                workflow.environmentLaunched ? "success" : "muted"
-              )}
-            >
-              {workflow.environmentLaunched
-                ? "Environment live"
-                : sessionCompleted
-                ? "Environment cleaned up"
-                : "Not launched"}
-            </span>
-            {summary.activeLabStep ? (
+          <div
+            className={
+              isMinimalSection
+                ? "session-shell__workspace-toolbar"
+                : "session-shell__status"
+            }
+          >
+            {isMinimalSection ? (
+              <>
+                <span>{sessionLoadError ? "Needs attention" : minimalStatusLabel}</span>
+                {currentSessionId ? <span>Session #{currentSessionId}</span> : null}
+              </>
+            ) : (
+              <>
+                <span className={badgeClass(sessionLoadError ? "danger" : "success")}>
+                  {sessionLoadError
+                    ? "Session error"
+                    : `Session #${currentSessionId || "?"}`}
+                </span>
+                {sessionCompleted ? (
+                  <span className={badgeClass("muted")}>Session completed</span>
+                ) : null}
+                <span
+                  className={badgeClass(
+                    workflow.environmentLaunched ? "success" : "muted"
+                  )}
+                >
+                  {workflow.environmentLaunched
+                    ? "Environment live"
+                    : sessionCompleted
+                    ? "Environment cleaned up"
+                    : "Not launched"}
+                </span>
+              </>
+            )}
+            {summary.activeLabStep && !isMinimalSection ? (
               <span className={badgeClass("info")}>
                 Current task: {workflow.currentTaskLabel}
               </span>
             ) : null}
           </div>
 
-          <div className="action-strip">
-            <button
-              type="button"
-              className="button button--ghost"
-              onClick={handleStartFreshSession}
-              disabled={startingSession}
-            >
-              {startingSession ? "Starting..." : "Start Session"}
-            </button>
-            <button
-              type="button"
-              className={launchButtonClass}
-              onClick={handleLaunch}
-              disabled={!currentSessionId || launchingLab || sessionCompleted}
-            >
-              {launchingLab ? "Launching..." : "Launch Environment"}
-            </button>
-            {workflow.environmentLaunched && !sessionCompleted ? (
+          <div className="action-strip session-shell__actions">
+            {!isMinimalSection ? (
               <button
                 type="button"
-                className="button button--ghost"
-                onClick={handleTeardownEnvironment}
-                disabled={!currentSessionId || tearingDownLab || resettingLab}
+                className={launchButtonClass}
+                onClick={handleLaunch}
+                disabled={!currentSessionId || launchingLab || sessionCompleted}
               >
-                {tearingDownLab && !resettingLab
-                  ? "Cleaning up..."
-                  : "Clean Up Environment"}
+                {launchingLab ? "Launching..." : "Launch Environment"}
               </button>
             ) : null}
-            {workflow.environmentLaunched && !sessionCompleted ? (
-              <button
-                type="button"
-                className="button button--ghost"
-                onClick={handleResetEnvironment}
-                disabled={!currentSessionId || resettingLab || tearingDownLab}
-              >
-                {resettingLab || tearingDownLab
-                  ? "Resetting..."
-                  : "Reset Environment"}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className={reportButtonClass}
-              onClick={handleGenerateReport}
-              disabled={!currentSessionId || generatingReport}
-            >
-              {generatingReport ? "Generating..." : "Generate Report"}
-            </button>
-            {!sessionCompleted && currentSessionId ? (
-              <button
-                type="button"
-                className="button button--ghost"
-                onClick={handleEndSession}
-                disabled={endingSession}
-              >
-                {endingSession ? "Ending..." : "End Session"}
-              </button>
-            ) : null}
+            <details className="session-actions-menu">
+              <summary className="button button--ghost">
+                {isWorkspaceSection ? "More" : sessionActionsLabel}
+              </summary>
+              <div className="session-actions-menu__content">
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  onClick={handleStartFreshSession}
+                  disabled={startingSession}
+                >
+                  {startingSession ? "Starting..." : "Start Session"}
+                </button>
+                {workflow.environmentLaunched && !sessionCompleted ? (
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={handleTeardownEnvironment}
+                    disabled={!currentSessionId || tearingDownLab || resettingLab}
+                  >
+                    {tearingDownLab && !resettingLab
+                      ? "Cleaning up..."
+                      : "Clean Up Environment"}
+                  </button>
+                ) : null}
+                {workflow.environmentLaunched && !sessionCompleted ? (
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={handleResetEnvironment}
+                    disabled={!currentSessionId || resettingLab || tearingDownLab}
+                  >
+                    {resettingLab || tearingDownLab
+                      ? "Resetting..."
+                      : "Reset Environment"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={reportButtonClass}
+                  onClick={handleGenerateReport}
+                  disabled={!currentSessionId || generatingReport}
+                >
+                  {generatingReport ? "Generating..." : "Generate Report"}
+                </button>
+                {!sessionCompleted && currentSessionId ? (
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={handleEndSession}
+                    disabled={endingSession}
+                  >
+                    {endingSession ? "Ending..." : "End Session"}
+                  </button>
+                ) : null}
+              </div>
+            </details>
           </div>
         </div>
 
-        <div className="session-journey">
+        {!isWorkspaceSection && !isOverviewSection ? (
+          <div
+            className={`session-journey ${
+              isFocusSection ? "session-journey--focus" : ""
+            }`}
+          >
           <div className="session-journey__header">
             <div className="content-stack">
               <div>
-                <span className="eyebrow">Mini Lab Guide</span>
+                <span className="eyebrow">
+                  {isFocusSection ? "Active Lab Flow" : "Lab Path"}
+                </span>
                 <h2>
-                  Step {currentSection.step}: {currentSection.label}
+                  {isFocusSection
+                    ? workflow.currentTaskLabel
+                    : `Step ${currentSection.step}: ${currentSection.label}`}
                 </h2>
               </div>
               <p className="section-lead">
-                Use this guide to move through the lab in order. Each section
-                explains what this part of the exercise is for and where to go
-                when you are ready for the next stage.
+                {isFocusSection
+                  ? "Keep the lab guide, workspace, and tutor working together. Read the step, validate it live, and only move to reports when the evidence is ready."
+                  : "Use this guide to move through the lab in order. Each section explains what this part of the exercise is for and where to go when you are ready for the next stage."}
               </p>
               <div className="session-guide-note">
-                <span className={badgeClass("info")}>{currentSection.phase}</span>
-                <p>{currentSection.description}</p>
+                <span className={badgeClass("info")}>
+                  {isFocusSection ? "Lab focus" : currentSection.phase}
+                </span>
+                <p>
+                  {isFocusSection
+                    ? workflow.currentTaskObjective || currentSection.description
+                    : currentSection.description}
+                </p>
               </div>
             </div>
 
@@ -328,10 +391,15 @@ export default function SessionShell({
                   {workflow.completedMilestones}/{workflow.milestones.length} milestones complete
                 </span>
               </div>
-              <strong>Recommended action: {workflow.nextRecommendation.label}</strong>
+              <strong>
+                {isFocusSection ? "Current lab rhythm" : "Recommended action"}:{" "}
+                {workflow.nextRecommendation.label}
+              </strong>
               <p>{workflow.nextRecommendation.description}</p>
               <div className="session-journey__next">
-                <span className="detail-label">Recommended next section</span>
+                <span className="detail-label">
+                  {isFocusSection ? "Next supporting space" : "Recommended next section"}
+                </span>
                 <p>
                   {recommendedSection
                     ? `${recommendedSection.label}: ${recommendedSection.description}`
@@ -348,12 +416,14 @@ export default function SessionShell({
             />
           </div>
           <p className="session-guide-progress">
-            Workflow progress: {workflow.workflowPercent}% complete across{" "}
+            Lab progress: {workflow.workflowPercent}% complete across{" "}
             {workflow.milestones.length} milestones. {workflow.status.detail}
           </p>
-        </div>
+          </div>
+        ) : null}
 
-        <nav className="session-subnav" aria-label="Mini lab guide sections">
+        {!isWorkspaceSection && !isOverviewSection ? (
+          <nav className="session-subnav" aria-label="Mini lab guide sections">
           {SESSION_SECTIONS.map((section) => {
             const stageMeta =
               SESSION_STAGE_META[
@@ -389,7 +459,8 @@ export default function SessionShell({
               </NavLink>
             );
           })}
-        </nav>
+          </nav>
+        ) : null}
 
         <StatusBanner message={message} onDismiss={clearMessage} />
 
@@ -413,7 +484,7 @@ export default function SessionShell({
         ) : isRouteLoading ? (
           <SessionStateCard
             title="Loading session workspace"
-            description={`Preparing session ${routeSessionId || currentSessionId} and syncing progress from the backend.`}
+            description={`Preparing session ${routeSessionId || currentSessionId} and loading your saved progress.`}
           >
             <div className="session-loading-row">
               <div className="skeleton skeleton--title" />
@@ -455,7 +526,17 @@ export default function SessionShell({
             </Link>
           </SessionStateCard>
         ) : (
-          <div className="session-shell__body">
+          <div
+            className={`session-shell__body ${
+              isWorkspaceSection
+                ? "session-shell__body--workspace"
+                : isOverviewSection
+                ? "session-shell__body--overview"
+                : isFocusSection
+                ? "session-shell__body--focus"
+                : ""
+            }`}
+          >
             <div ref={sectionViewportRef} className="session-shell__main">
               <div key={location.pathname} className="session-panel-stage">
                 <Suspense fallback={<SessionSectionFallback />}>
@@ -464,9 +545,11 @@ export default function SessionShell({
               </div>
             </div>
 
-            <aside className="session-shell__rail">
-              <SessionSidebar visitedSections={workflow.visitedSections} />
-            </aside>
+            {!isWorkspaceSection && !isOverviewSection ? (
+              <aside className="session-shell__rail">
+                <SessionSidebar visitedSections={workflow.visitedSections} />
+              </aside>
+            ) : null}
           </div>
         )}
       </section>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getHealth } from "../api/Client";
 
 export default function Dashboard() {
-  const [status, setStatus] = useState("Checking backend...");
+  const [status, setStatus] = useState("Checking platform status...");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -20,7 +20,7 @@ export default function Dashboard() {
     <div style={{ padding: 24 }}>
       <h1>Dashboard</h1>
 
-      <h2>Backend Status</h2>
+      <h2>Platform Status</h2>
       {error ? (
         <p style={{ color: "red" }}>Error: {error}</p>
       ) : (
